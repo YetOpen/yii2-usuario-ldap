@@ -21,6 +21,25 @@ or add
 
 to the require section of your `composer.json` file.
 
+Installazione per sviluppo
+-----------------------------
 
-Usage
------
+Aggiungere al composer sotto la voce `"require-dev"`:
+
+```
+"yetopen/yii2-usuario-ldap": "@dev"
+```
+
+E sotto `"repositories"`:
+
+```json
+{
+    "type": "path",
+    "url": "{path_all_estensione}"
+}
+```
+
+Quindi eseguire:
+```bash
+php composer.phar update yetopen/yii2-usuario-ldap
+```
