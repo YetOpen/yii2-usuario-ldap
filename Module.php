@@ -17,11 +17,14 @@ class Module extends BaseModule
 {
     public static $ldapProvider;
 
+    // Contiene le informazioni per connettersi a LDAP
     public $ldapConfig;
 
+    // È il suffisso degli utenti in LDAP
     public $accountSuffix;
 
-    public $enableLdapUpdate;
+    // Determina se l'applicazione possa scrivere su LDAP
+    public $updateLdap;
 
     public function init()
     {
