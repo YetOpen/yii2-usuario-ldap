@@ -2,13 +2,17 @@
     "name": "yetopen/yii2-usuario-ldap",
     "description": "An yii2 extension to syncronize LDAP users in Yii",
     "type": "yii2-extension",
-    "minimum-stability": "dev",
+    "minimum-stability": "stable",
     "keywords": ["yii2","extension","usuario","ldap"],
     "license": "GPL-3.0+",
     "authors": [
         {
             "name": "Marco Piazza",
             "email": "marco.piazza@yetopen.it"
+        }
+        {
+            "name": "Liviu Calin",
+            "email": "liviu.calin@yetopen.it"
         }
     ],
     "require": {

@@ -2,37 +2,71 @@
 
 namespace yetopen\usuario_ldap;
 
+use Adldap\Adldap;
+use Adldap\AdldapException;
 use Yii;
 use yii\base\Model as BaseModule;
-use yii\helpers\ArrayHelper;
-use adLDAP\adLDAPException;
-//use \Adldap\Configuration\DomainConfiguration;
-use adLDAP\adLDAP as Adldap;
 use yii\base\Event;
-use app\controllers\user\SecurityController;
+use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
 use Da\User\Model\User;
 
 class Module extends BaseModule
 {
-    public static $ldapProvider;
+    public $ldapProvider;
+
+    public $secondLdapProvider;
 
     // Contiene le informazioni per connettersi a LDAP
     public $ldapConfig;
 
-    // È il suffisso degli utenti in LDAP
-    public $accountSuffix;
+    // Contiene le informazioni per connettersi a LDAP
+    public $secondLdapConfig;
 
     // Determina se l'applicazione possa scrivere su LDAP
     public $updateLdap;
 
+    /**
+     * If TRUE when a user pass the LDAP authentication, on first LDAP server, it is created locally
+     * If FALSE a default users with id -1 is used for the session
+     * @var bool
+     */
+    public $createLocalUsers = TRUE;
+
+    /**
+     * Roles to be assigned to new local users
+     * @var bool|array
+     */
+    public $defaultRoles = FALSE;
+
+    /**
+     * If TRUE changes to local users are synchronized with the second LDAP server specified.
+     * Including creation and deletion of an user.
+     * @var bool
+     */
+    public $syncUsersToLdap = FALSE;
+
     public function init()
     {
-        $ad = new Adldap($this->ldapConfig);
-        $ad->setAccountSuffix($this->accountSuffix);
+        // For second LDAP parameters use first one as default if not set
+        if (is_null($this->secondLdapConfig)) $this->secondLdapConfig = $this->ldapConfig;
+
+        // Connect first LDAP
+        $ad = new Adldap();
+        $ad->addProvider($this->ldapConfig);
         try {
             $ad->connect();
-            self::$ldapProvider = $ad;
+            $this->ldapProvider = $ad;
+        } catch (adLDAPException $e) {
+            var_dump($e);
+            die;
+        }
+        // Connect second LDAP
+        $ad2 = new Adldap();
+        $ad2->addProvider($this->secondLdapConfig);
+        try {
+            $ad2->connect();
+            $this->secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
             var_dump($e);
             die;
@@ -43,28 +77,52 @@ class Module extends BaseModule
 
     public function events() {
         Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
-            $provider = Yii::$app->usuarioLdap::$ldapProvider;
+            $provider = Yii::$app->usuarioLdap->ldapProvider;
             $form = $event->getForm();
 
             $username = $form->login;
             $password = $form->password;
-            if(!$provider->authenticate($username, $password)) {
+
+            // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
+            try {
+                if ($provider->auth()->attempt($username, $password)) {
+                    // Passed.
+                } else {
+                    // Failed.
+                    return;
+                }
+            } catch (\Adldap\Auth\UsernameRequiredException $e) {
+                // The user didn't supply a username.
+                return;
+            } catch (\Adldap\Auth\PasswordRequiredException $e) {
+                // The user didn't supply a password.
                 return;
             }
 
-            $userIdentity = User::findIdentity(User::findOne(['username' => $username])->id);
-            if(empty($userIdentity)) {
-                $userIdentity = new User();
-                $userIdentity->username       = $username;
-                $userIdentity->password       = $password;
-                $userIdentity->email          = $username."@ldap.com"; //FIXME prendere l'email da utente LDAP
-                $userIdentity->confirmed_at   = time();
-                $userIdentity->blocked_at     = time();
+            $user = User::findOne(['username' => $username]);
+            if(empty($user)) {
+                if ($this->createLocalUsers) {
+                    $user = new User();
+                    $user->username = $username;
+                    $user->password = $password;
+                    $user->email = $username . "@ldap.com"; //FIXME prendere l'email da utente LDAP https://adldap2.github.io/Adldap2/#/searching
+                    $user->confirmed_at = time();
+//                $user->blocked_at     = time();
+                    if (!$user->save()) {
+                        return;
+                    }
+                    if ($this->defaultRoles !== FALSE) {
+                        // FIXME to be implemented
+                    }
+                } else {
+                    // FIXME use a default user with id -1
+                }
             }
+            // Now I have a valid user which passed LDAP authentication, lets login it
+            $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
 
             return Yii::$app->getUser()->login($userIdentity, $duration);
-
         });
     }
 }

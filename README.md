@@ -60,12 +60,31 @@ In web.php nella cartella config inserire
         'ldapConfig' => [
             'hosts' => ['host.example.com'],
             'base_dn' => 'dc=mydomain,dc=local',
+            'account_prefix' => 'cn=',
+            'account_suffix' => ',ou=Users,dc=mydomain,dc=local',
             'username' => 'admin',
             'password' => 'password',
         ],
-        'accountSuffix' => '@mydomain.local',
-    ]
+        'createLocalUsers' => TRUE,
+        'defaultRoles' => ['standardUser'],
+        'syncUsersToLdap' => TRUE,
+        'secondLdapConfig' => [
+            'hosts' => ['host.example.com'],
+            'base_dn' => 'dc=mydomain,dc=local',
+            'account_prefix' => 'cn=',
+            'account_suffix' => ',ou=Users,dc=mydomain,dc=local',
+            'username' => 'admin',
+            'password' => 'password',
+        ],
+    ],
     //...
 ]
 ```
-modificando i parametri con quelli opportuni
+modificando i parametri con quelli opportuni.
+#### Parameters meaning
+* **ldapConfig**: all the parameters for connecting to LDAP server as documented in [Adldap2](https://adldap2.github.io/Adldap2/#/setup?id=options)
+* **createLocalUsers**: if TRUE when a user pass the LDAP authentication, on first LDAP server, it is created locally. If FALSE a default users with id -1 is used for the session
+* **defaultRoles**: if specified the role/s will be assigned to the new created users. Can be set as an array. By default this is FALSE
+* **syncUsersToLdap**: if TRUE changes to local users are synchronized with the second LDAP server specified. Including creation and deletion of an user.
+* **secondLdapConfig**: if specified this is used as LDAP server for sync the local users.
+By default this is equal to _ldapConfig_
