@@ -22,13 +22,11 @@ use yii\db\ActiveRecord;
 class Module extends BaseModule
 {
     /**
-     * @var Provider
+     * Stores the LDAP provider
+     * @var Adldap
      */
     public $ldapProvider;
 
-    /**
-     * @var Provider
-     */
     public $secondLdapProvider;
 
     // Contiene le informazioni per connettersi a LDAP
@@ -36,9 +34,6 @@ class Module extends BaseModule
 
     // Contiene le informazioni per connettersi a LDAP
     public $secondLdapConfig;
-
-    // Determina se l'applicazione possa scrivere su LDAP
-    public $updateLdap;
 
     /**
      * If TRUE when a user pass the LDAP authentication, on first LDAP server, it is created locally
@@ -59,6 +54,13 @@ class Module extends BaseModule
      * @var bool
      */
     public $syncUsersToLdap = FALSE;
+
+    /**
+     * Specify the default User ID of the User from which to get the identity from.
+     * It is used only when $createLocalUsers is set to FALSE. Defaults to -1 (usuario default User)
+     * @var integer
+     */
+    public $defaultUserId = -1;
 
     public function init()
     {
@@ -99,11 +101,8 @@ class Module extends BaseModule
 
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
             try {
-                if ($provider->auth()->attempt($username, $password)) {
-                    // Passed.
-                    var_dump("success");
-                    die();
-                } else {
+                if (!$provider->auth()->attempt($username, $password)) {
+                    // FIXME throw an exception
                     // Failed.
                     return;
                 }
@@ -116,29 +115,49 @@ class Module extends BaseModule
             }
 
             $user = User::findOne(['username' => $username]);
-            if(empty($user)) {
+            if (empty($user)) {
                 if ($this->createLocalUsers) {
                     $user = new User();
                     $user->username = $username;
                     $user->password = $password;
                     $user->email = $username . "@ldap.com"; //FIXME prendere l'email da utente LDAP https://adldap2.github.io/Adldap2/#/searching
                     $user->confirmed_at = time();
-//                $user->blocked_at     = time();
+
                     if (!$user->save()) {
+                        // FIXME handle save error
                         return;
                     }
                     if ($this->defaultRoles !== FALSE) {
                         // FIXME to be implemented
                     }
                 } else {
-                    // FIXME use a default user with id -1
+                    $user = User::findOne($this->defaultUserId);
+                    if (empty($user)) {
+                        // The default User wasn't found, it has to be created
+                        $user = new User();
+                        $user->id = $this->defaultUserId;
+                        $user->email = "default@user.com";
+                        $user->confirmed_at = time();
+                        if (!$user->save()) {
+                            var_dump($user->getErrors());
+                            die;
+                            //FIXME handle save error
+                            return;
+                        }
+                    }
+                    $user->username = $username;
                 }
             }
             // Now I have a valid user which passed LDAP authentication, lets login it
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
 
-            return Yii::$app->getUser()->login($userIdentity, $duration);
+            if (Yii::$app->getUser()->login($userIdentity, $duration)) {
+                return Yii::$app->response->redirect(Yii::$app->request->referrer);
+            } else {
+                // FIXME handle login error
+                return;
+            }
         });
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
