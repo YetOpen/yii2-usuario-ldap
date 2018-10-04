@@ -27,12 +27,22 @@ class Module extends BaseModule
      */
     public $ldapProvider;
 
+    /**
+     * Stores the second LDAP provider
+     * @var Adldap
+     */
     public $secondLdapProvider;
 
-    // Contiene le informazioni per connettersi a LDAP
+    /**
+     * Parameters for connecting to LDAP server as documented in https://adldap2.github.io/Adldap2/#/setup?id=options
+     * @var array
+     */
     public $ldapConfig;
 
-    // Contiene le informazioni per connettersi a LDAP
+    /**
+     * Parameters for connecting to the second LDAP server
+     * @var array
+     */
     public $secondLdapConfig;
 
     /**
@@ -56,7 +66,7 @@ class Module extends BaseModule
     public $syncUsersToLdap = FALSE;
 
     /**
-     * Specify the default User ID of the User from which to get the identity from.
+     * Specify the default ID of the User used for the session.
      * It is used only when $createLocalUsers is set to FALSE.
      * @var integer
      */
