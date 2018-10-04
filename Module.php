@@ -57,7 +57,7 @@ class Module extends BaseModule
 
     /**
      * Specify the default User ID of the User from which to get the identity from.
-     * It is used only when $createLocalUsers is set to FALSE. Defaults to -1 (usuario default User)
+     * It is used only when $createLocalUsers is set to FALSE.
      * @var integer
      */
     public $defaultUserId = -1;
@@ -99,10 +99,14 @@ class Module extends BaseModule
             $username = $form->login;
             $password = $form->password;
 
+            // If somehow username or password are empty, let usuario handle it
+            if(empty($username) || empty($password)) {
+                return;
+            }
+
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
             try {
                 if (!$provider->auth()->attempt($username, $password)) {
-                    // FIXME throw an exception
                     // Failed.
                     return;
                 }
@@ -145,19 +149,26 @@ class Module extends BaseModule
                             return;
                         }
                     }
+                    if ($this->defaultRoles !== FALSE) {
+                        // FIXME to be implemented
+                    }
+
                     $user->username = $username;
+                    $userIdentity = User::findIdentity($this->defaultUserId);
+                    $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
+                    if (Yii::$app->getUser()->login($userIdentity, $duration)) {
+                        return Yii::$app->response->redirect(Yii::$app->request->referrer);
+                    } else {
+                        // FIXME handle login error
+                        return;
+                    }
                 }
             }
             // Now I have a valid user which passed LDAP authentication, lets login it
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
 
-            if (Yii::$app->getUser()->login($userIdentity, $duration)) {
-                return Yii::$app->response->redirect(Yii::$app->request->referrer);
-            } else {
-                // FIXME handle login error
-                return;
-            }
+            return Yii::$app->getUser()->login($userIdentity, $duration);
         });
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
