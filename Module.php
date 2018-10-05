@@ -12,6 +12,7 @@ use Da\User\Event\UserEvent;
 use Da\User\Model\User;
 use ErrorException;
 use NoLdapUserException;
+use RoleNotFoundException;
 use Yii;
 use yii\base\Model as BaseModule;
 use yii\base\Event;
@@ -72,8 +73,18 @@ class Module extends BaseModule
      */
     public $defaultUserId = -1;
 
+    /**
+     * @var null
+     */
+    public $userIdentificationLdapAttribute = NULL;
+
+    /**
+     * {@inheritdoc}
+     */
     public function init()
     {
+        // TODO check the types of the module params
+
         // For second LDAP parameters use first one as default if not set
         if (is_null($this->secondLdapConfig)) $this->secondLdapConfig = $this->ldapConfig;
 
@@ -115,16 +126,8 @@ class Module extends BaseModule
             }
 
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
-            try {
-                if (!$provider->auth()->attempt($username, $password)) {
-                    // Failed.
-                    return;
-                }
-            } catch (\Adldap\Auth\UsernameRequiredException $e) {
-                // The user didn't supply a username.
-                return;
-            } catch (\Adldap\Auth\PasswordRequiredException $e) {
-                // The user didn't supply a password.
+            if (!$provider->auth()->attempt($username, $password)) {
+                // Failed.
                 return;
             }
 
@@ -134,7 +137,7 @@ class Module extends BaseModule
                     $user = new User();
                     $user->username = $username;
                     $user->password = $password;
-                    $user->email = $username . "@ldap.com"; //FIXME prendere l'email da utente LDAP https://adldap2.github.io/Adldap2/#/searching
+                    $user->email = $this->findLdapUser($username)->getEmail();
                     $user->confirmed_at = time();
 
                     if (!$user->save()) {
@@ -142,7 +145,11 @@ class Module extends BaseModule
                         return;
                     }
                     if ($this->defaultRoles !== FALSE) {
-                        // FIXME to be implemented
+                        // FIXME this should be checked in init()
+                        if(!is_array($this->defaultRoles)) {
+                            throw new ErrorException('defaultRoles parameter must be an array');
+                        }
+                        $this->assignRoles($user->id);
                     }
                 } else {
                     $user = User::findOne($this->defaultUserId);
@@ -158,9 +165,13 @@ class Module extends BaseModule
                             //FIXME handle save error
                             return;
                         }
-                    }
-                    if ($this->defaultRoles !== FALSE) {
-                        // FIXME to be implemented
+                        if ($this->defaultRoles !== FALSE) {
+                            // FIXME this should be checked in init()
+                            if(!is_array($this->defaultRoles)) {
+                                throw new ErrorException('defaultRoles parameter must be an array');
+                            }
+                            $this->assignRoles($user->id);
+                        }
                     }
 
                     $user->username = $username;
@@ -247,7 +258,9 @@ class Module extends BaseModule
      * @throws NoLdapUserException
      */
     private function findLdapUser ($username) {
-        $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->search()->where('cn', '=', $username)->first();
+        $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->search()
+            ->where($this->userIdentificationLdapAttribute ?: 'cn', '=', $username)
+            ->first();
         if (empty($ldapUser)) {
             throw new NoLdapUserException("Impossible to find the LDAP user");
         }
@@ -271,6 +284,25 @@ class Module extends BaseModule
 
         if (!$ldapUser->save()) {
             throw new ErrorException("Impossible to create the LDAP user");
+        }
+    }
+
+    /**
+     * @param integer $userId
+     * @throws ErrorException
+     * @throws RoleNotFoundException
+     */
+    private function assignRoles($userId) {
+        $auth = Yii::$app->authManager;
+        foreach ($this->defaultRoles as $roleName) {
+            if(!is_string($roleName)) {
+                throw new ErrorException('The role name must be a string');
+            }
+            if(!($role = $auth->getRole($roleName))) {
+                throw new RoleNotFoundException($roleName);
+            }
+
+            $auth->assign($role, $userId);
         }
     }
 }
