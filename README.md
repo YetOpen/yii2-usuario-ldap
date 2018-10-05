@@ -62,6 +62,7 @@ In web.php nella cartella config inserire
             'base_dn' => 'dc=mydomain,dc=local',
             'account_prefix' => 'cn=',
             'account_suffix' => ',ou=Users,dc=mydomain,dc=local',
+            'use_ssl'          => true,
             'username' => 'admin',
             'password' => 'password',
         ],
