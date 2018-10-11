@@ -8,11 +8,13 @@ use Adldap\Connections\Provider;
 use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\User as AdldapUser;
 use Da\User\Controller\AdminController;
+use Da\User\Controller\RecoveryController;
+use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
 use Da\User\Model\User;
 use ErrorException;
-use NoLdapUserException;
-use RoleNotFoundException;
+use yetopen\usuario_ldap\NoLdapUserException;
+use yetopen\usuario_ldap\RoleNotFoundException;
 use Yii;
 use yii\base\Model as BaseModule;
 use yii\base\Event;
@@ -77,6 +79,12 @@ class Module extends BaseModule
      * @var null
      */
     public $userIdentificationLdapAttribute = NULL;
+
+    private static $mapUserARtoLDAPattr = [
+        'sn' => 'username',
+        'uid' => 'username',
+        'mail' => 'email',
+    ];
 
     /**
      * {@inheritdoc}
@@ -175,30 +183,42 @@ class Module extends BaseModule
                     }
 
                     $user->username = $username;
-                    $userIdentity = User::findIdentity($this->defaultUserId);
-                    $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
-                    if (Yii::$app->getUser()->login($userIdentity, $duration)) {
-                        return Yii::$app->response->redirect(Yii::$app->request->referrer);
-                    } else {
-                        // FIXME handle login error
-                        return;
-                    }
+                    // Make the ldap username available in session for any possible use :D
+                    Yii::$app->session->set('ldap_username', $username);
                 }
             }
             // Now I have a valid user which passed LDAP authentication, lets login it
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
-
-            return Yii::$app->getUser()->login($userIdentity, $duration);
+            Yii::$app->getUser()->login($userIdentity, $duration);
+            Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
+            return Yii::$app->getResponse()->redirect(Yii::$app->request->referrer)->send();
         });
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
         }
+        Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
+            /**
+             * After a successful login if no LDAP user is found I create it.
+             * Is the only point where I can have the user password in clear for existing users
+             * and sync them to LDAP
+             */
+            $form = $event->getForm();
+
+            $username = $form->login;
+            try {
+                $ldapUser = $this->findLdapUser($username);
+            } catch (NoLdapUserException $e) {
+                $password = $form->password;
+                $user = User::findOne(['username' => $username]);
+                $user->password = $password;
+                $this->createLdapUser($user);
+            }
+        });
         Event::on(AdminController::class, UserEvent::EVENT_BEFORE_CREATE, function (UserEvent $event) {
             $user = $event->getUser();
             $this->createLdapUser($user);
-
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
             $user = $event->getUser();
@@ -216,11 +236,12 @@ class Module extends BaseModule
                 return;
             }
 
-            // Set LDAP user attributes from local user
-            $ldapUser->setAttribute('sn', empty($user->profile) ? $user->username :  $user->profile->name);
-            $ldapUser->setAttribute('gn', empty($user->profile) ? $user->username :  $user->profile->name);
-            $ldapUser->setAttribute('mail', $user->email);
-            $ldapUser->setAttribute('uid', $user->username);
+            // Set LDAP user attributes from local user if changed
+            foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
+                if ($user->isAttributeChanged($userAttr)) {
+                    $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+                }
+            }
             if (!empty($user->password)) {
                 // If clear password is specified I update it also in LDAP
                 $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
@@ -235,6 +256,28 @@ class Module extends BaseModule
                 if (!$ldapUser->rename("cn={$user->username}")) {
                     throw new ErrorException("Impossible to rename the LDAP user");
                 }
+            }
+        });
+        Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
+            $token = $event->getToken();
+            $user = $token->user;
+            try {
+                $ldapUser = $this->findLdapUser($user->username);
+            } catch (NoLdapUserException $e) {
+                // Unable to find the user in ldap, if I have the password in cleare I create it
+                // these case typically happens when the sync is enabled and we already have users
+                if (!empty($user->password)) {
+                    $this->createLdapUser($user);
+                }
+                return;
+            }
+            if (!empty($user->password)) {
+                // If clear password is specified I update it also in LDAP
+                $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
+            }
+
+            if (!$ldapUser->save()) {
+                throw new ErrorException("Impossible to modify the LDAP user");
             }
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
@@ -274,13 +317,20 @@ class Module extends BaseModule
     private function createLdapUser ($user) {
         $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
             'cn' => $user->username,
-            'sn' => empty($user->profile) ? $user->username :  $user->profile->name,
-            'gn' => empty($user->profile) ? $user->username :  $user->profile->name,
-            'mail' => $user->email,
-            'uid' => $user->username,
-            // FIXME Adldap\Models\User has method setPassword but seams to use a LDAP attribute not supported
-            'userPassword' => '{SHA}'. base64_encode(pack('H*', sha1($user->password))),
         ]);
+
+        // Set LDAP user attributes from local user if changed
+        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
+                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+        }
+
+        $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
+
+        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
+            if ($user->isAttributeChanged($userAttr)) {
+                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+            }
+        }
 
         if (!$ldapUser->save()) {
             throw new ErrorException("Impossible to create the LDAP user");

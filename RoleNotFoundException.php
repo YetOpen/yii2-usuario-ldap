@@ -1,5 +1,7 @@
 <?php
 
+namespace yetopen\usuario_ldap;
+
 class RoleNotFoundException extends \yii\base\Exception
 {
     /**
@@ -8,9 +10,9 @@ class RoleNotFoundException extends \yii\base\Exception
      * @param int $code
      * @param Throwable|null $previous
      */
-    public function __construct(string $roleName = "", int $code = 0, Throwable $previous = null)
+    public function __construct($roleName, $code = 0, Throwable $previous = null)
     {
-        $message = "$message role was not found";
+        $message = "$roleName role was not found";
         parent::__construct($message, $code, $previous);
     }
 }
