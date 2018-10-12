@@ -80,6 +80,13 @@ class Module extends BaseModule
      */
     public $userIdentificationLdapAttribute = NULL;
 
+    /**
+     * Array of names of the alternative Organizational Units
+     * If set the login will be tried also on the OU specified
+     * @var false
+     */
+    public $otherOrganizationalUnits = FALSE;
+
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
         'uid' => 'username',
@@ -101,6 +108,26 @@ class Module extends BaseModule
         $ad->addProvider($this->ldapConfig);
         try {
             $ad->connect();
+            // If otherOrganizationalUnits setting is configured, attemps the login with the other OU
+            if($this->otherOrganizationalUnits) {
+                $config = $this->ldapConfig;
+                // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
+                foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
+                    if(isset($config['account_suffix'])) {
+                        // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
+                        preg_match('/(,ou=[\w]+)*(?<rest>,.*)*/i', $config['account_suffix'], $accountSuffix);
+                        // Rebuilds the account_suffix
+                        $config['account_suffix'] = ",ou=".$otherOrganizationalUnit.$accountSuffix['rest'];
+                        // Sets a provider with the new account_suffix
+                    } else {
+                        // Rebuilds the base_dn
+                        $config['base_dn'] = "ou=".$otherOrganizationalUnit.$config['base_dn'].',';
+                    }
+                    // Sets a provider with the configuration
+                    $ad->addProvider($config, $otherOrganizationalUnit);
+                    $ad->connect($otherOrganizationalUnit);
+                }
+            }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
             var_dump($e);
@@ -122,6 +149,7 @@ class Module extends BaseModule
 
     public function events() {
         Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
+            /* @var $provider Adldap */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
             $form = $event->getForm();
 
@@ -135,17 +163,34 @@ class Module extends BaseModule
 
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
             if (!$provider->auth()->attempt($username, $password)) {
-                // Failed.
-                return;
+                $failed = TRUE;
+                if($this->otherOrganizationalUnits) {
+                    foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
+                        $prov = $provider->getProvider($otherOrganizationalUnit);
+                        if($prov->auth()->attempt($username, $password)) {
+                            $failed = FALSE;
+                            break;
+                        }
+                    }
+                }
+                if($failed) {
+                    // Failed.
+                    return;
+                }
             }
 
-            $user = User::findOne(['username' => $username]);
+            $username_inserted = $username;
+            $username = $this->findLdapUser($username)->getAttribute('uid');
+            $user = User::findOne(['username' => $username ?: $username_inserted]);
             if (empty($user)) {
                 if ($this->createLocalUsers) {
                     $user = new User();
-                    $user->username = $username;
+                    $user->username = $username ?: $username_inserted;
                     $user->password = $password;
-                    $user->email = $this->findLdapUser($username)->getEmail();
+                    // Gets the email from the ldap user
+                    $user->email = $this
+                        ->findLdapUser($username ?: $username_inserted, $username ? 'uid' : 'cn', 'ldapProvider')
+                        ->getEmail();
                     $user->confirmed_at = time();
 
                     if (!$user->save()) {
@@ -183,10 +228,11 @@ class Module extends BaseModule
                     }
 
                     $user->username = $username;
-                    // Make the ldap username available in session for any possible use :D
-                    Yii::$app->session->set('ldap_username', $username);
                 }
             }
+            // Make the ldap username available in session for any possible use :D
+            Yii::$app->session->set('ldap_username', $username);
+
             // Now I have a valid user which passed LDAP authentication, lets login it
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
@@ -297,15 +343,19 @@ class Module extends BaseModule
 
     /**
      * @param $username
-     * @return AdldapUser
-     * @throws NoLdapUserException
+     * @param string $key
+     * @return mixed
+     * @throws \yetopen\usuario_ldap\NoLdapUserException
      */
-    private function findLdapUser ($username) {
-        $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->search()
-            ->where($this->userIdentificationLdapAttribute ?: 'cn', '=', $username)
+    private function findLdapUser ($username, $key = 'cn', $ldapProvider = 'secondLdapProvider') {
+        $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+            ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
             ->first();
         if (empty($ldapUser)) {
             throw new NoLdapUserException("Impossible to find the LDAP user");
+        }
+        if(get_class($ldapUser) !== AdldapUser::class) {
+            throw new NoLdapUserException("The search for the user returned an instance of the class ".get_class($ldapUser));
         }
         return $ldapUser;
     }
