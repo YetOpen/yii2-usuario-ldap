@@ -210,9 +210,6 @@ class Module extends BaseModule
                         // FIXME handle save error
                     }
 
-                    // Triggers the EVENT_AFTER_CREATE event
-                    $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
-
                     if ($this->defaultRoles !== FALSE) {
                         // FIXME this should be checked in init()
                         if(!is_array($this->defaultRoles)) {
@@ -220,6 +217,9 @@ class Module extends BaseModule
                         }
                         $this->assignRoles($user->id);
                     }
+
+                    // Triggers the EVENT_AFTER_CREATE event
+                    $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
                 } else {
                     $user = User::findOne($this->defaultUserId);
                     if (empty($user)) {
