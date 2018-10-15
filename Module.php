@@ -11,6 +11,7 @@ use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
+use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
 use yetopen\usuario_ldap\NoLdapUserException;
@@ -126,6 +127,8 @@ class Module extends BaseModule
                     // Sets a provider with the configuration
                     $ad->addProvider($config, $otherOrganizationalUnit);
                     $ad->connect($otherOrganizationalUnit);
+                    // Sets the config as the original
+                    $config = $this->ldapConfig;
                 }
             }
             $this->ldapProvider = $ad;
@@ -156,7 +159,7 @@ class Module extends BaseModule
             $username = $form->login;
             $password = $form->password;
 
-            // If somehow username or password are empty, let usuario handle it
+            // If somehow username or password are empty, lets usuario handle it
             if(empty($username) || empty($password)) {
                 return;
             }
@@ -180,7 +183,7 @@ class Module extends BaseModule
             }
 
             $username_inserted = $username;
-            $username = $this->findLdapUser($username)->getAttribute('uid');
+            $username = $this->findLdapUser($username)->getAttribute('uid')[0];
             $user = User::findOne(['username' => $username ?: $username_inserted]);
             if (empty($user)) {
                 if ($this->createLocalUsers) {
@@ -192,11 +195,24 @@ class Module extends BaseModule
                         ->findLdapUser($username ?: $username_inserted, $username ? 'uid' : 'cn', 'ldapProvider')
                         ->getEmail();
                     $user->confirmed_at = time();
-
                     if (!$user->save()) {
                         // FIXME handle save error
                         return;
                     }
+
+                    // Gets the profile name of the user from the CN of the LDAP user
+                    $profile = Profile::findOne(['user_id' => $user->id]);
+                    $profile->name = $this
+                        ->findLdapUser($username ?: $username_inserted, $username ? 'uid' : 'cn', 'ldapProvider')
+                        ->getAttribute('cn')[0];
+                    // Tries to save only if the name has been found
+                    if ($profile->name && !$profile->save()) {
+                        // FIXME handle save error
+                    }
+
+                    // Triggers the EVENT_AFTER_CREATE event
+                    $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
+
                     if ($this->defaultRoles !== FALSE) {
                         // FIXME this should be checked in init()
                         if(!is_array($this->defaultRoles)) {
@@ -230,8 +246,6 @@ class Module extends BaseModule
                     $user->username = $username;
                 }
             }
-            // Make the ldap username available in session for any possible use :D
-            Yii::$app->session->set('ldap_username', $username);
 
             // Now I have a valid user which passed LDAP authentication, lets login it
             $userIdentity = User::findIdentity($user->id);
