@@ -184,15 +184,18 @@ class Module extends BaseModule
 
             $username_inserted = $username;
             $username = $this->findLdapUser($username)->getAttribute('uid')[0];
-            $user = User::findOne(['username' => $username ?: $username_inserted]);
+            if (empty($username)) {
+                $username = $username_inserted;
+            }
+            $user = User::findOne(['username' => $username]);
             if (empty($user)) {
                 if ($this->createLocalUsers) {
                     $user = new User();
-                    $user->username = $username ?: $username_inserted;
+                    $user->username = $username;
                     $user->password = $password;
                     // Gets the email from the ldap user
                     $user->email = $this
-                        ->findLdapUser($username ?: $username_inserted, $username ? 'uid' : 'cn', 'ldapProvider')
+                        ->findLdapUser($username, 'uid', 'ldapProvider')
                         ->getEmail();
                     $user->confirmed_at = time();
                     if (!$user->save()) {
@@ -203,7 +206,7 @@ class Module extends BaseModule
                     // Gets the profile name of the user from the CN of the LDAP user
                     $profile = Profile::findOne(['user_id' => $user->id]);
                     $profile->name = $this
-                        ->findLdapUser($username ?: $username_inserted, $username ? 'uid' : 'cn', 'ldapProvider')
+                        ->findLdapUser($username, 'uid', 'ldapProvider')
                         ->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
@@ -361,13 +364,27 @@ class Module extends BaseModule
      * @return mixed
      * @throws \yetopen\usuario_ldap\NoLdapUserException
      */
-    private function findLdapUser ($username, $key = 'cn', $ldapProvider = 'secondLdapProvider') {
-        $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
-            ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
-            ->first();
+    private function findLdapUser ($username, $key = NULL, $ldapProvider = 'secondLdapProvider') {
+        if(!is_null($key)) {
+            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+                ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
+                ->first();
+        }
+
+        if (is_null($key) || empty($ldapUser)){
+            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+                ->users()
+                ->find($username);
+        }
+
         if (empty($ldapUser)) {
             throw new NoLdapUserException("Impossible to find the LDAP user");
         }
+
+        if (is_array($ldapUser)) {
+            throw new MultipleUsersFoundException();
+        }
+
         if(get_class($ldapUser) !== AdldapUser::class) {
             throw new NoLdapUserException("The search for the user returned an instance of the class ".get_class($ldapUser));
         }
