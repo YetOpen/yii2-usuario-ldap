@@ -7,6 +7,7 @@ use Adldap\AdldapException;
 use Adldap\Connections\Provider;
 use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\User as AdldapUser;
+use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Event\ResetPasswordEvent;
@@ -23,6 +24,23 @@ use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
 use yii\db\ActiveRecord;
 
+/**
+ * Class Module
+ * @package yetopen\usuario_ldap
+ *
+ * @property Adldap $ldapProvider
+ * @property Adldap $secondLdapProvider
+ * @property array $ldapConfig
+ * @property array $secondLdapConfig
+ * @property bool $createLocalUsers
+ * @property bool|array $defaultRoles
+ * @property bool $syncUsersToLdap
+ * @property int $defaultUserId
+ * @property string $userIdentificationLdapAttribute
+ * @property bool|array $otherOrganizationalUnits
+ *
+ * @property array $mapUserARtoLDAPattr
+ */
 class Module extends BaseModule
 {
     /**
@@ -77,7 +95,7 @@ class Module extends BaseModule
     public $defaultUserId = -1;
 
     /**
-     * @var null
+     * @var null|string
      */
     public $userIdentificationLdapAttribute = NULL;
 
@@ -99,7 +117,8 @@ class Module extends BaseModule
      */
     public function init()
     {
-        // TODO check the types of the module params
+        // TODO check all the module params
+        $this->checkLdapConfiguration();
 
         // For second LDAP parameters use first one as default if not set
         if (is_null($this->secondLdapConfig)) $this->secondLdapConfig = $this->ldapConfig;
@@ -114,7 +133,7 @@ class Module extends BaseModule
                 $config = $this->ldapConfig;
                 // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
                 foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
-                    if(isset($config['account_suffix'])) {
+                    if($config['schema'] === OpenLDAP::class) {
                         // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
                         preg_match('/(,ou=[\w]+)*(?<rest>,.*)*/i', $config['account_suffix'], $accountSuffix);
                         // Rebuilds the account_suffix
@@ -152,7 +171,7 @@ class Module extends BaseModule
 
     public function events() {
         Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
-            /* @var $provider Adldap */
+            /* @var $provider Provider */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
             $form = $event->getForm();
 
@@ -165,12 +184,12 @@ class Module extends BaseModule
             }
 
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
-            if (!$provider->auth()->attempt($username, $password)) {
+            if (!$this->tryAuthentication($provider, $username, $password)) {
                 $failed = TRUE;
                 if($this->otherOrganizationalUnits) {
                     foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
                         $prov = $provider->getProvider($otherOrganizationalUnit);
-                        if($prov->auth()->attempt($username, $password)) {
+                        if($this->tryAuthentication($prov, $username, $password)) {
                             $failed = FALSE;
                             break;
                         }
@@ -183,7 +202,18 @@ class Module extends BaseModule
             }
 
             $username_inserted = $username;
-            $username = $this->findLdapUser($username)->getAttribute('uid')[0];
+            if($this->ldapConfig['schema'] === OpenLDAP::class) {
+                $user = $this->findLdapUser($username, 'uid');
+                if(is_null($user)) {
+                    $user = $this->findLdapUser($username, 'cn');
+                }
+                if(is_null($user)) {
+                    throw new NoLdapUserException("Impossible to find LDAP user");
+                }
+                $username = $user->getAttribute('uid')[0];
+            } else {
+                $username = $this->findLdapUser($username)->getAttribute('uid')[0];
+            }
             if (empty($username)) {
                 $username = $username_inserted;
             }
@@ -192,7 +222,7 @@ class Module extends BaseModule
                 if ($this->createLocalUsers) {
                     $user = new User();
                     $user->username = $username;
-                    $user->password = $password;
+                    $user->password = uniqid();
                     // Gets the email from the ldap user
                     $user->email = $this
                         ->findLdapUser($username, 'uid', 'ldapProvider')
@@ -359,6 +389,48 @@ class Module extends BaseModule
     }
 
     /**
+     * @param $provider Provider
+     * @param $username string
+     * @param $password string
+     * @return boolean
+     */
+    private function tryAuthentication($provider, $username, $password) {
+        // If schema is not an instance of OpenLDAP returns the result of the authentication attempt
+        if($this->ldapConfig['schema'] !== OpenLDAP::class) {
+            return $provider->auth()->attempt($username, $password);
+        }
+
+        // Finds the user first using the username as uid then, if nothing was found, as cn
+        // FIXME should it be done for the mail key too?
+        $user = $this->findLdapUser($username, 'uid');
+        if(is_null($user)) {
+            $user = $this->findLdapUser($username, 'cn');
+        }
+        // If no users were found it means the authentication would never success
+        if(is_null($user)) {
+            return FALSE;
+        }
+
+        // Gets the user authentication attribute from the dn
+        $dn = $user->getAttribute("dn")[0];
+        preg_match('/(?<prefix>.*)='.$username.$this->ldapConfig['account_suffix'].'/i', $dn, $prefix);
+        $config = $this->ldapConfig;
+        $config['account_prefix'] = $prefix['prefix']."=";
+        $userAuth = $user->getAttribute($prefix['prefix'])[0];
+
+        // The provider configuration needs to be reset with the new account_prefix
+        $provider->setConfiguration($config);
+        $provider->connect();
+        $success = FALSE;
+        if($provider->auth()->attempt($userAuth, $password)) {
+            $success = TRUE;
+        }
+        $provider->setConfiguration($this->ldapConfig);
+        $provider->connect();
+        return $success;
+    }
+
+    /**
      * @param $username
      * @param string $key
      * @return mixed
@@ -378,7 +450,7 @@ class Module extends BaseModule
         }
 
         if (empty($ldapUser)) {
-            throw new NoLdapUserException("Impossible to find the LDAP user");
+            return NULL;
         }
 
         if (is_array($ldapUser)) {
@@ -434,6 +506,32 @@ class Module extends BaseModule
             }
 
             $auth->assign($role, $userId);
+        }
+    }
+
+    /**
+     * Checks the plugin configuration params
+     * @throws LdapConfigurationErrorException
+     */
+    private function checkLdapConfiguration() {
+        if(!isset($this->ldapConfig)) {
+            throw new LdapConfigurationErrorException('ldapConfig must be specified');
+        }
+        if(!isset($this->ldapConfig['schema'])) {
+            throw new LdapConfigurationErrorException('schema must be specified');
+        }
+        if($this->ldapConfig['schema'] === OpenLDAP::class) {
+            $this->checkOpenLdapConfiguration();
+        }
+    }
+
+    /**
+     * Checks the plugin configuration params when the schema is set as OpenLDAP
+     * @throws LdapConfigurationErrorException
+     */
+    private function checkOpenLdapConfiguration() {
+        if(!isset($this->ldapConfig['account_suffix'])) {
+            throw new LdapConfigurationErrorException(OpenLDAP::class.' requires an account suffix');
         }
     }
 }
