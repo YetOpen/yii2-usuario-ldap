@@ -1,10 +1,10 @@
 <?php
 
-namespace yetopen\usuario_ldap;
+namespace yetopen\usuario-ldap;
 
 /**
  * Class MultipleUsersFoundException
- * @package yetopen\usuario_ldap
+ * @package yetopen\usuario-ldap
  */
 class MultipleUsersFoundException extends \yii\base\Exception
 {
