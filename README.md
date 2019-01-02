@@ -20,7 +20,7 @@ or add
 
 to the require section of your `composer.json` file.
 
-## Configuration
+## Configuration
 
 Add in your config (`config/web.php` for the basic app):
 
