@@ -1,4 +1,4 @@
-# Yii2 Usuario Ldap
+# Yii2 Usuario LDAP
 
 An yii2 extension to authenticate and/or syncronize users against LDAP for [2amigos/yii2-usuario](https://github.com/2amigos/yii2-usuario).
 

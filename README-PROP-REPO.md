@@ -1,7 +1,6 @@
-Yii2 Usuario Ldap
-=================
-Installation from proprietary repository
---------------------------------
+# Yii2 Usuario LDAP
+
+## Installation from proprietary repository
 
 Add
 
