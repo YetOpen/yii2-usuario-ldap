@@ -87,7 +87,5 @@ modificando i parametri con quelli opportuni.
 * **createLocalUsers**: if TRUE when a user pass the LDAP authentication, on first LDAP server, it is created locally. If FALSE a default users with ID specified in defaultUserId is used for the session
 * **defaultRoles**: if specified the role/s will be assigned to the new created users. Can be set as an array. By default this is FALSE
 * **syncUsersToLdap**: if TRUE changes to local users are synchronized with the second LDAP server specified. Including creation and deletion of an user.
-* **secondLdapConfig**: if specified this is used as LDAP server for sync the local users.
+* **secondLdapConfig**: if specified this is used as LDAP server for sync the local users, if not specified this is equal to _ldapConfig_
 * **defaultUserId**: if createLocalUsers is set to FALSE, specify the ID of the default user. Defaults to `-1`
-
-By default this is equal to _ldapConfig_
