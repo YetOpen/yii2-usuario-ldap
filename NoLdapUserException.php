@@ -1,6 +1,6 @@
 <?php
 
-namespace yetopen\usuario_ldap;
+namespace yetopen\usuario-ldap;
 
 /**
  * Class NoLdapUserException

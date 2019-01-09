@@ -1,13 +1,13 @@
 <?php
 
-namespace yetopen\usuario_ldap;
+namespace yetopen\usuario-ldap;
 
 
 use yii\base\Exception;
 
 /**
  * Class LdapConfigurationException
- * @package yetopen\usuario_ldap
+ * @package yetopen\usuario-ldap
  */
 class LdapConfigurationErrorException extends Exception
 {
