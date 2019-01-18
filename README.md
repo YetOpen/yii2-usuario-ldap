@@ -31,7 +31,7 @@ Add in your config (`config/web.php` for the basic app):
 'components' => [
     //...
     'usuarioLdap' => [
-        'class' => 'yetopen\usuario-ldap\Module',
+        'class' => 'yetopen\usuarioLdap\Module',
         'ldapConfig' => [
             'hosts' => ['host.example.com'],
             'base_dn' => 'dc=mydomain,dc=local',

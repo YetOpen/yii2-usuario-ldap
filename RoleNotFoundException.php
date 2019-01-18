@@ -1,6 +1,6 @@
 <?php
 
-namespace yetopen\usuario-ldap;
+namespace yetopen\usuarioLdap;
 
 class RoleNotFoundException extends \yii\base\Exception
 {

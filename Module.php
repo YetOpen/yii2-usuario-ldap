@@ -1,6 +1,6 @@
 <?php
 
-namespace yetopen\usuario-ldap;
+namespace yetopen\usuarioLdap;
 
 use Adldap\Adldap;
 use Adldap\AdldapException;
@@ -15,8 +15,8 @@ use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
-use yetopen\usuario-ldap\NoLdapUserException;
-use yetopen\usuario-ldap\RoleNotFoundException;
+use yetopen\usuarioLdap\NoLdapUserException;
+use yetopen\usuarioLdap\RoleNotFoundException;
 use Yii;
 use yii\base\Model as BaseModule;
 use yii\base\Event;
@@ -26,7 +26,7 @@ use yii\db\ActiveRecord;
 
 /**
  * Class Module
- * @package yetopen\usuario-ldap
+ * @package yetopen\usuarioLdap
  *
  * @property Adldap $ldapProvider
  * @property Adldap $secondLdapProvider
@@ -434,7 +434,7 @@ class Module extends BaseModule
      * @param $username
      * @param string $key
      * @return mixed
-     * @throws \yetopen\usuario-ldap\NoLdapUserException
+     * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
     private function findLdapUser ($username, $key = NULL, $ldapProvider = 'secondLdapProvider') {
         if(!is_null($key)) {
