@@ -52,6 +52,8 @@ Add in your config (`config/web.php` for the basic app):
             'username' => 'bind_username',
             'password' => 'bind_password',
         ],
+        'allowPasswordRecovery' => FALSE,
+        'passwordRecoveryRedirect' => ['/controller/action']
     ],
     //...
 ]
@@ -66,3 +68,5 @@ adapting parameters to your setup.
 * **secondLdapConfig**: if specified this is used as LDAP server for sync the local users, if not specified this is equal to _ldapConfig_
 * **syncUsersToLdap**: if TRUE changes to local users are synchronized to the second LDAP server. This includes creation and deletion of an user
 * **defaultUserId**: if `createLocalUsers` is set to FALSE must contain the ID of an user to be used as local. Defaults to `-1`
+* **allowPasswordRecovery**: if TRUE it will enable password recovery process, otherwise it will redirect the LDAP users to the url specified in `passwrdRecoveryRedirect`. Defaults to FALSE.
+* **passwordRecoveryRedirect**: when `allowPasswordRecovery` is set to FALSE specifies the URL where the user will be redirected when trying to recover the password. This parameter will be processed by yii\helpers\Url::to().

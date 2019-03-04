@@ -106,6 +106,22 @@ class Module extends BaseModule
      */
     public $otherOrganizationalUnits = FALSE;
 
+    /**
+     * Determines if password recovery is disabled or not for LDAP users.
+     * If this property is set to FALSE it requires $passwordRecoveryRedirect to be specified.
+     * It defaults to TRUE.
+     * @var bool
+     */
+    public $allowPasswordRecovery = FALSE;
+
+    /**
+     * The URL where the user will be redirected when trying to recover the password.
+     * This parameter will be processed by yii\helpers\Url::to().
+     * It's required when $allowPasswordRecovery is set to FALSE.
+     * @var null | string | array
+     */
+    public $passwordRecoveryRedirect = NULL;
+
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
         'uid' => 'username',
@@ -286,6 +302,19 @@ class Module extends BaseModule
             Yii::$app->getUser()->login($userIdentity, $duration);
             Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
             return Yii::$app->getResponse()->redirect(Yii::$app->request->referrer)->send();
+        });
+        Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
+            /**
+             * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
+             * If the the uurlser is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
+             * to the url specified in `passwordRecoveryRedirect`
+             */
+            $form = $event->getForm();
+            $email = $form->email;
+            $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+            if(!is_null($ldapUser) && !$this->allowPasswordRecovery) {
+                return Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
+            }
         });
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
@@ -522,6 +551,9 @@ class Module extends BaseModule
         }
         if($this->ldapConfig['schema'] === OpenLDAP::class) {
             $this->checkOpenLdapConfiguration();
+        }
+        if($this->allowPasswordRecovery === FALSE && is_null($this->passwordRecoveryRedirect)) {
+            throw new LdapConfigurationErrorException('passwordRecoveryRedirect must be specified if allowPasswordRecovery is set to FALSE');
         }
     }
 
