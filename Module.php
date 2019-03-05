@@ -313,7 +313,8 @@ class Module extends BaseModule
             $email = $form->email;
             $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
             if(!is_null($ldapUser) && !$this->allowPasswordRecovery) {
-                return Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
+                Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
+                Yii::$app->end();
             }
         });
         if ($this->syncUsersToLdap !== TRUE) {
