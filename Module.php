@@ -168,8 +168,7 @@ class Module extends BaseModule
             }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
-            var_dump($e);
-            die;
+            return;
         }
         // Connect second LDAP
         $ad2 = new Adldap();
