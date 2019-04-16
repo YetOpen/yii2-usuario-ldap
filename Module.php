@@ -218,16 +218,20 @@ class Module extends BaseModule
 
             $username_inserted = $username;
             if($this->ldapConfig['schema'] === OpenLDAP::class) {
-                $user = $this->findLdapUser($username, 'uid');
-                if(is_null($user)) {
-                    $user = $this->findLdapUser($username, 'cn');
+                $user = NULL;
+                foreach (['uid', 'cn'] as $ldapAttr) {
+                    try {
+                        $user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
+                    } catch (NoLdapUserException $e) {
+                        continue;
+                    }
                 }
                 if(is_null($user)) {
                     throw new NoLdapUserException("Impossible to find LDAP user");
                 }
                 $username = $user->getAttribute('uid')[0];
             } else {
-                $username = $this->findLdapUser($username)->getAttribute('uid')[0];
+                $username = $this->findLdapUser($username, NULL, 'ldapProvider')->getAttribute('uid')[0];
             }
             if (empty($username)) {
                 $username = $username_inserted;
@@ -330,7 +334,7 @@ class Module extends BaseModule
 
             $username = $form->login;
             try {
-                $ldapUser = $this->findLdapUser($username);
+                $ldapUser = $this->findLdapUser($username, 'cn');
             } catch (NoLdapUserException $e) {
                 $password = $form->password;
                 $user = User::findOne(['username' => $username]);
@@ -348,7 +352,7 @@ class Module extends BaseModule
             // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
             $username = $user->oldAttributes['username'];
             try {
-                $ldapUser = $this->findLdapUser($username);
+                $ldapUser = $this->findLdapUser($username, 'cn');
             } catch (NoLdapUserException $e) {
                 // Unable to find the user in ldap, if I have the password in cleare I create it
                 // these case typically happens when the sync is enabled and we already have users
@@ -384,7 +388,7 @@ class Module extends BaseModule
             $token = $event->getToken();
             $user = $token->user;
             try {
-                $ldapUser = $this->findLdapUser($user->username);
+                $ldapUser = $this->findLdapUser($user->username, 'cn');
             } catch (NoLdapUserException $e) {
                 // Unable to find the user in ldap, if I have the password in cleare I create it
                 // these case typically happens when the sync is enabled and we already have users
@@ -405,7 +409,7 @@ class Module extends BaseModule
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
             $user = $event->getUser();
             try {
-                $ldapUser = $this->findLdapUser($user->username);
+                $ldapUser = $this->findLdapUser($user->username, 'cn');
             } catch (NoLdapUserException $e) {
                 // We don't have a corresponding LDAP user so nothing to delete
                 return;
@@ -431,18 +435,22 @@ class Module extends BaseModule
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
-        $user = $this->findLdapUser($username, 'uid');
-        if(is_null($user)) {
-            $user = $this->findLdapUser($username, 'cn');
+        $user = NULL;
+        foreach (['uid', 'cn'] as $ldapAttr) {
+            try {
+                $user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
+            } catch (NoLdapUserException $e) {
+                continue;
+            }
+            break;
         }
-        // If no users were found it means the authentication would never success
         if(is_null($user)) {
             return FALSE;
         }
 
-        // Gets the user authentication attribute from the dn
-        $dn = $user->getAttribute("dn")[0];
-        preg_match('/(?<prefix>.*)='.$username.$this->ldapConfig['account_suffix'].'/i', $dn, $prefix);
+        // Since an account can be matched by several attributes I take the one used in the dn for doing the bind
+        preg_match('/(?<prefix>.*)=.*'.$this->ldapConfig['account_suffix'].'/i', $dn, $prefix);
+
         $config = $this->ldapConfig;
         $config['account_prefix'] = $prefix['prefix']."=";
         $userAuth = $user->getAttribute($prefix['prefix'])[0];
@@ -472,14 +480,8 @@ class Module extends BaseModule
                 ->first();
         }
 
-        if (is_null($key) || empty($ldapUser)){
-            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
-                ->users()
-                ->find($username);
-        }
-
         if (empty($ldapUser)) {
-            return NULL;
+            throw new NoLdapUserException();
         }
 
         if (is_array($ldapUser)) {
@@ -503,7 +505,7 @@ class Module extends BaseModule
 
         // Set LDAP user attributes from local user if changed
         foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
-                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+            $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
         }
 
         $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));

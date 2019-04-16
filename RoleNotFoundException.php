@@ -2,7 +2,9 @@
 
 namespace yetopen\usuarioLdap;
 
-class RoleNotFoundException extends \yii\base\Exception
+use Exception;
+
+class RoleNotFoundException extends Exception
 {
     /**
      * RoleNotFoundException constructor.

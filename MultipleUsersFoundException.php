@@ -2,11 +2,13 @@
 
 namespace yetopen\usuarioLdap;
 
+use Exception;
+
 /**
  * Class MultipleUsersFoundException
  * @package yetopen\usuarioLdap
  */
-class MultipleUsersFoundException extends \yii\base\Exception
+class MultipleUsersFoundException extends Exception
 {
 
 }

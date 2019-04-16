@@ -2,10 +2,12 @@
 
 namespace yetopen\usuarioLdap;
 
+use Exception;
+
 /**
  * Class NoLdapUserException
  */
-class NoLdapUserException extends \yii\base\Exception
+class NoLdapUserException extends Exception
 {
 
 }
