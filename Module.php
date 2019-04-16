@@ -229,10 +229,10 @@ class Module extends BaseModule
                 if(is_null($user)) {
                     throw new NoLdapUserException("Impossible to find LDAP user");
                 }
-                $username = $user->getAttribute('uid')[0];
             } else {
-                $username = $this->findLdapUser($username, NULL, 'ldapProvider')->getAttribute('uid')[0];
+                $user = $this->findLdapUser($username, 'cn', 'ldapProvider');
             }
+            $username = $user->getAttribute('uid')[0];
             if (empty($username)) {
                 $username = $username_inserted;
             }
@@ -243,9 +243,7 @@ class Module extends BaseModule
                     $user->username = $username;
                     $user->password = uniqid();
                     // Gets the email from the ldap user
-                    $user->email = $this
-                        ->findLdapUser($username, 'uid', 'ldapProvider')
-                        ->getEmail();
+                    $user->email = $user->getEmail();
                     $user->confirmed_at = time();
                     if (!$user->save()) {
                         // FIXME handle save error
@@ -254,9 +252,7 @@ class Module extends BaseModule
 
                     // Gets the profile name of the user from the CN of the LDAP user
                     $profile = Profile::findOne(['user_id' => $user->id]);
-                    $profile->name = $this
-                        ->findLdapUser($username, 'uid', 'ldapProvider')
-                        ->getAttribute('cn')[0];
+                    $profile->name = $user->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
                         // FIXME handle save error
@@ -473,12 +469,10 @@ class Module extends BaseModule
      * @return mixed
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    private function findLdapUser ($username, $key = NULL, $ldapProvider = 'secondLdapProvider') {
-        if(!is_null($key)) {
-            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
-                ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
-                ->first();
-        }
+    private function findLdapUser ($username, $key, $ldapProvider = 'secondLdapProvider') {
+        $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+            ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
+            ->first();
 
         if (empty($ldapUser)) {
             throw new NoLdapUserException();
