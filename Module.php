@@ -217,20 +217,17 @@ class Module extends BaseModule
             }
 
             $username_inserted = $username;
-            if($this->ldapConfig['schema'] === OpenLDAP::class) {
-                $ldap_user = NULL;
-                foreach (['uid', 'cn'] as $ldapAttr) {
-                    try {
-                        $ldap_user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
-                    } catch (NoLdapUserException $e) {
-                        continue;
-                    }
+            $ldap_user = NULL;
+            foreach (['uid', 'cn', 'samaccountname'] as $ldapAttr) {
+                try {
+                    $ldap_user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
+                } catch (NoLdapUserException $e) {
+                    continue;
                 }
-                if(is_null($ldap_user)) {
-                    throw new NoLdapUserException("Impossible to find LDAP user");
-                }
-            } else {
-                $ldap_user = $this->findLdapUser($username, 'cn', 'ldapProvider');
+            }
+
+            if(is_null($ldap_user)) {
+                throw new NoLdapUserException("Impossible to find LDAP user");
             }
             $username = $ldap_user->getAttribute('uid')[0];
             if (empty($username)) {
@@ -432,7 +429,7 @@ class Module extends BaseModule
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
         $user = NULL;
-        foreach (['uid', 'cn'] as $ldapAttr) {
+        foreach (['uid', 'cn', 'samaccountname'] as $ldapAttr) {
             try {
                 $user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
             } catch (NoLdapUserException $e) {
