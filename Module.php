@@ -444,6 +444,8 @@ class Module extends BaseModule
             return FALSE;
         }
 
+        // Gets the user authentication attribute from the dn
+        $dn = $user->getAttribute("dn")[0];
         // Since an account can be matched by several attributes I take the one used in the dn for doing the bind
         preg_match('/(?<prefix>.*)=.*'.$this->ldapConfig['account_suffix'].'/i', $dn, $prefix);
 
