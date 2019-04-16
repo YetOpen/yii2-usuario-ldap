@@ -218,21 +218,21 @@ class Module extends BaseModule
 
             $username_inserted = $username;
             if($this->ldapConfig['schema'] === OpenLDAP::class) {
-                $user = NULL;
+                $ldap_user = NULL;
                 foreach (['uid', 'cn'] as $ldapAttr) {
                     try {
-                        $user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
+                        $ldap_user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
                     } catch (NoLdapUserException $e) {
                         continue;
                     }
                 }
-                if(is_null($user)) {
+                if(is_null($ldap_user)) {
                     throw new NoLdapUserException("Impossible to find LDAP user");
                 }
             } else {
-                $user = $this->findLdapUser($username, 'cn', 'ldapProvider');
+                $ldap_user = $this->findLdapUser($username, 'cn', 'ldapProvider');
             }
-            $username = $user->getAttribute('uid')[0];
+            $username = $ldap_user->getAttribute('uid')[0];
             if (empty($username)) {
                 $username = $username_inserted;
             }
@@ -243,7 +243,7 @@ class Module extends BaseModule
                     $user->username = $username;
                     $user->password = uniqid();
                     // Gets the email from the ldap user
-                    $user->email = $user->getEmail();
+                    $user->email = $ldap_user->getEmail();
                     $user->confirmed_at = time();
                     if (!$user->save()) {
                         // FIXME handle save error
@@ -252,7 +252,7 @@ class Module extends BaseModule
 
                     // Gets the profile name of the user from the CN of the LDAP user
                     $profile = Profile::findOne(['user_id' => $user->id]);
-                    $profile->name = $user->getAttribute('cn')[0];
+                    $profile->name = $ldap_user->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
                         // FIXME handle save error
