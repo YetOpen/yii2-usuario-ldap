@@ -7,6 +7,7 @@ use Adldap\AdldapException;
 use Adldap\Connections\Provider;
 use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\User as AdldapUser;
+use Adldap\Schemas\ActiveDirectory;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
@@ -428,11 +429,14 @@ class Module extends BaseModule
      * @param $username string
      * @param $password string
      * @return boolean
+     * @throws \Adldap\Auth\BindException
+     * @throws \Adldap\Auth\PasswordRequiredException
+     * @throws \Adldap\Auth\UsernameRequiredException
      */
     private function tryAuthentication($provider, $username, $password) {
-        // If schema is not an instance of OpenLDAP returns the result of the authentication attempt
-        if($this->ldapConfig['schema'] !== OpenLDAP::class) {
-            return $provider->auth()->attempt($username, $password);
+        // Tries to authenticate the user with the standard configuration
+        if($provider->auth()->attempt($username, $password)) {
+            return TRUE;
         }
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
@@ -450,14 +454,14 @@ class Module extends BaseModule
             return FALSE;
         }
 
-        // Gets the user authentication attribute from the dn
-        $dn = $user->getAttribute("dn")[0];
+        // Gets the user authentication attribute from the distinguished name
+        $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
         // Since an account can be matched by several attributes I take the one used in the dn for doing the bind
         preg_match('/(?<prefix>.*)=.*'.$this->ldapConfig['account_suffix'].'/i', $dn, $prefix);
 
         $config = $this->ldapConfig;
         $config['account_prefix'] = $prefix['prefix']."=";
-        $userAuth = $user->getAttribute($prefix['prefix'])[0];
+        $userAuth = $user->getAttribute($prefix['prefix'], 0);
 
         // The provider configuration needs to be reset with the new account_prefix
         $provider->setConfiguration($config);
