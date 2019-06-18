@@ -335,9 +335,18 @@ class Module extends BaseModule
                 $this->createLdapUser($user);
             }
         });
-        Event::on(AdminController::class, UserEvent::EVENT_BEFORE_CREATE, function (UserEvent $event) {
+        Event::on(AdminController::class, UserEvent::EVENT_AFTER_CREATE, function (UserEvent $event) {
             $user = $event->getUser();
-            $this->createLdapUser($user);
+            try {
+                $this->createLdapUser($user);
+            } catch (\yii\base\ErrorException $e) {
+                // Probably the user already exists on LDAP
+                // TODO:
+                // I can arrive here if:
+                // * LDAP access is enabled with local user creation and local users sync is enabled with the same LDAP
+                // * local users sync is enabled with an already populated LDAP and somebody tries to create a user with an existing username in LDAP
+                // None of the presented cases at the moment is part of our specifications
+            }
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
             $user = $event->getUser();
