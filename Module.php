@@ -96,6 +96,13 @@ class Module extends BaseModule
     public $defaultUserId = -1;
 
     /**
+     * Specify a session key where to save the LDAP username in case of LDAP authentication
+     * set NULL in order to not save the username in session
+     * @var string
+     */
+    public $sessionKeyForUsername = 'ldap_username';
+
+    /**
      * @var null|string
      */
     public $userIdentificationLdapAttribute = NULL;
@@ -297,6 +304,7 @@ class Module extends BaseModule
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
             Yii::$app->getUser()->login($userIdentity, $duration);
+            Yii::$app->session->set($this->sessionKeyForUsername, $user->username);
             Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
             return Yii::$app->getResponse()->redirect(Yii::$app->request->referrer)->send();
         });
