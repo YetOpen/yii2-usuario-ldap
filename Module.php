@@ -316,7 +316,11 @@ class Module extends BaseModule
              */
             $form = $event->getForm();
             $email = $form->email;
-            $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+            try {
+                $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+            } catch (NoLdapUserException $e) {
+                return;
+            }
             if(!is_null($ldapUser) && !$this->allowPasswordRecovery) {
                 Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
                 Yii::$app->end();
