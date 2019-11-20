@@ -70,3 +70,22 @@ adapting parameters to your setup.
 * **defaultUserId**: if `createLocalUsers` is set to FALSE must contain the ID of an user to be used as local. Defaults to `-1`
 * **allowPasswordRecovery**: if TRUE it will enable password recovery process, otherwise it will redirect the LDAP users to the url specified in `passwrdRecoveryRedirect`. Defaults to FALSE.
 * **passwordRecoveryRedirect**: when `allowPasswordRecovery` is set to FALSE specifies the URL where the user will be redirected when trying to recover the password. This parameter will be processed by yii\helpers\Url::to().
+* **logCategory**: it's the log category that will be passed when the module logs something, defaults to _YII2_USUARIO_LDAP_
+
+#### Log configuration
+
+To log all the messages about the module in one single file, configure under `targets` of log config file
+```php
+[
+    'class' => 'yii\log\FileTarget', // or another target if you prefer
+    // Gets all the log and exceptions messages of the module
+    'categories' => [
+        'YII2_USUARIO_LDAP',
+        'yetopen\usuarioLdap\NoLdapUserException',
+        'yetopen\usuarioLdap\LdapConfigurationErrorException',
+        'yetopen\usuarioLdap\MultipleUsersFoundException',
+        'yetopen\usuarioLdap\RoleNotFoundException',
+    ],
+    'logFile' => '@runtime/logs/usuario_ldap.log', // or the log file destination that you prefer
+]
+```

@@ -5,9 +5,7 @@ namespace yetopen\usuarioLdap;
 use Adldap\Adldap;
 use Adldap\AdldapException;
 use Adldap\Connections\Provider;
-use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\User as AdldapUser;
-use Adldap\Schemas\ActiveDirectory;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
@@ -16,14 +14,13 @@ use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
-use yetopen\usuarioLdap\NoLdapUserException;
-use yetopen\usuarioLdap\RoleNotFoundException;
 use Yii;
 use yii\base\Model as BaseModule;
 use yii\base\Event;
 use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
 use yii\db\ActiveRecord;
+use yii\helpers\VarDumper;
 
 /**
  * Class Module
@@ -130,6 +127,12 @@ class Module extends BaseModule
      */
     public $passwordRecoveryRedirect = NULL;
 
+    /**
+     * It's the category of all the logs of the module, defaults to 'YII2_USUARIO_LDAP'
+     * @var string
+     */
+    public $logCategory = 'YII2_USUARIO_LDAP';
+
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
         'uid' => 'username',
@@ -176,6 +179,7 @@ class Module extends BaseModule
             }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
+            $this->error("Error connecting to LDAP Server", $e);
             return;
         }
         // Connect second LDAP
@@ -185,8 +189,8 @@ class Module extends BaseModule
             $ad2->connect();
             $this->secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
-            var_dump($e);
-            die;
+            $this->error("Error connecting to the second LDAP Server", $e);
+            return;
         }
         $this->events();
         parent::init();
@@ -203,6 +207,7 @@ class Module extends BaseModule
 
             // If somehow username or password are empty, lets usuario handle it
             if(empty($username) || empty($password)) {
+                $this->info("Either username or password was not specified");
                 return;
             }
 
@@ -219,6 +224,7 @@ class Module extends BaseModule
                     }
                 }
                 if($failed) {
+                    $this->warning("Authentication failed");
                     // Failed.
                     return;
                 }
@@ -243,7 +249,9 @@ class Module extends BaseModule
             }
             $user = User::findOne(['username' => $username]);
             if (empty($user)) {
+                $this->info("User not found in the application database");
                 if ($this->createLocalUsers) {
+                    $this->info("The user will be created");
                     $user = new User();
                     $user->username = $username;
                     $user->password = uniqid();
@@ -251,6 +259,7 @@ class Module extends BaseModule
                     $user->email = $ldap_user->getEmail();
                     $user->confirmed_at = time();
                     if (!$user->save()) {
+                        $this->error("Error saving the new user in the database", $user->errors);
                         // FIXME handle save error
                         return;
                     }
@@ -260,6 +269,7 @@ class Module extends BaseModule
                     $profile->name = $ldap_user->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
+                        $this->error("Error saving the new profile in the database", $profile->errors);
                         // FIXME handle save error
                     }
 
@@ -274,6 +284,7 @@ class Module extends BaseModule
                     // Triggers the EVENT_AFTER_CREATE event
                     $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
                 } else {
+                    $this->info("The user will be logged using the default user");
                     $user = User::findOne($this->defaultUserId);
                     if (empty($user)) {
                         // The default User wasn't found, it has to be created
@@ -282,8 +293,7 @@ class Module extends BaseModule
                         $user->email = "default@user.com";
                         $user->confirmed_at = time();
                         if (!$user->save()) {
-                            var_dump($user->getErrors());
-                            die;
+                            $this->error("Error creating the default user", $user->errors);
                             //FIXME handle save error
                             return;
                         }
@@ -319,6 +329,7 @@ class Module extends BaseModule
             try {
                 $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
             } catch (NoLdapUserException $e) {
+                $this->info("User $email not found");
                 return;
             }
             if(!is_null($ldapUser) && !$this->allowPasswordRecovery) {
@@ -446,10 +457,14 @@ class Module extends BaseModule
      * @throws \Adldap\Auth\UsernameRequiredException
      */
     private function tryAuthentication($provider, $username, $password) {
+        $this->info("Trying authentication for {$username} with provider", $provider);
         // Tries to authenticate the user with the standard configuration
         if($provider->auth()->attempt($username, $password)) {
+            $this->info("User successfully authenticated");
             return TRUE;
         }
+
+        $this->info("Default authentication didn't work, it will be tried again with another attribute");
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
@@ -463,8 +478,10 @@ class Module extends BaseModule
             break;
         }
         if(is_null($user)) {
+            $this->warning("Couldn't find the user using another attribute");
             return FALSE;
         }
+        $this->info("Found user with attribute `$ldapAttr`");
 
         // Gets the user authentication attribute from the distinguished name
         $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
@@ -480,6 +497,7 @@ class Module extends BaseModule
         $provider->connect();
         $success = FALSE;
         if($provider->auth()->attempt($userAuth, $password)) {
+            $this->info("User successfully authenticated");
             $success = TRUE;
         }
         $provider->setConfiguration($this->ldapConfig);
@@ -490,7 +508,9 @@ class Module extends BaseModule
     /**
      * @param $username
      * @param string $key
+     * @param string $ldapProvider
      * @return mixed
+     * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
     private function findLdapUser ($username, $key, $ldapProvider = 'secondLdapProvider') {
@@ -585,5 +605,41 @@ class Module extends BaseModule
         if(!isset($this->ldapConfig['account_suffix'])) {
             throw new LdapConfigurationErrorException(OpenLDAP::class.' requires an account suffix');
         }
+    }
+
+    /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function error($message, $object = NULL) {
+        $this->log('error', $message, $object);
+    }
+
+    /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function warning($message, $object = NULL) {
+        $this->log('warning', $message, $object);
+    }
+
+    /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function info($message, $object = NULL) {
+        $this->log('info', $message, $object);
+    }
+
+    /**
+     * @param $level string
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function log($level, $message, $object) {
+        if(!empty($object)) {
+            $message .= ": ".VarDumper::dumpAsString($object);
+        }
+        Yii::$level($message, $this->logCategory);
     }
 }
