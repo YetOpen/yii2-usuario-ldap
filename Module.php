@@ -452,6 +452,7 @@ class Module extends BaseModule
      * @param $username string
      * @param $password string
      * @return boolean
+     * @throws MultipleUsersFoundException
      * @throws \Adldap\Auth\BindException
      * @throws \Adldap\Auth\PasswordRequiredException
      * @throws \Adldap\Auth\UsernameRequiredException
@@ -462,6 +463,10 @@ class Module extends BaseModule
         if($provider->auth()->attempt($username, $password)) {
             $this->info("User successfully authenticated");
             return TRUE;
+        }
+        // If the suffix was not specified it is impossibile to search for another attribute
+        if(empty($this->ldapConfig['account_suffix'])) {
+            return FALSE;
         }
 
         $this->info("Default authentication didn't work, it will be tried again with another attribute");
