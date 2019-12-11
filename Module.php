@@ -230,6 +230,7 @@ class Module extends BaseModule
                     $user->confirmed_at = time();
                     if (!$user->save()) {
                         // FIXME handle save error
+                        Yii::error('Could not create local user',__METHOD__);
                         return;
                     }
 
@@ -241,6 +242,7 @@ class Module extends BaseModule
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
                         // FIXME handle save error
+                        Yii::error('Could not create local profile', __METHOD__);
                     }
 
                     if ($this->defaultRoles !== FALSE) {
@@ -262,6 +264,7 @@ class Module extends BaseModule
                         $user->email = "default@user.com";
                         $user->confirmed_at = time();
                         if (!$user->save()) {
+                            Yii::error('Could not create default user', __METHOD__);
                             var_dump($user->getErrors());
                             die;
                             //FIXME handle save error
@@ -291,21 +294,26 @@ class Module extends BaseModule
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
         }
+        Yii::debug('Registering LDAP sync events...', __METHOD__);
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
             /**
              * After a successful login if no LDAP user is found I create it.
              * Is the only point where I can have the user password in clear for existing users
              * and sync them to LDAP
              */
+            Yii::debug('Create user after successful login...', __METHOD__);
             $form = $event->getForm();
 
             $username = $form->login;
             try {
+                Yii::debug('Searching LDAP user...', __METHOD__);
                 $ldapUser = $this->findLdapUser($username);
+                Yii::debug(['Result for LDAP user', $ldapUser], __METHOD__);
             } catch (NoLdapUserException $e) {
                 $password = $form->password;
                 $user = User::findOne(['username' => $username]);
                 $user->password = $password;
+                Yii::debug(['User information', $user], __METHOD__);
                 $this->createLdapUser($user);
             }
         });
@@ -395,6 +403,8 @@ class Module extends BaseModule
      * @return boolean
      */
     private function tryAuthentication($provider, $username, $password) {
+        Yii::debug('Trying LDAP authentication...', __METHOD__);
+
         // If schema is not an instance of OpenLDAP returns the result of the authentication attempt
         if($this->ldapConfig['schema'] !== OpenLDAP::class) {
             return $provider->auth()->attempt($username, $password);
@@ -403,11 +413,14 @@ class Module extends BaseModule
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
         $user = $this->findLdapUser($username, 'uid');
+        Yii::debug(['LDAP user via uid', $user], __METHOD__);
         if(is_null($user)) {
             $user = $this->findLdapUser($username, 'cn');
+            Yii::debug(['LDAP user via cn', $user], __METHOD__);
         }
         // If no users were found it means the authentication would never success
         if(is_null($user)) {
+            Yii::info('LDAP user not found', __METHOD__);
             return FALSE;
         }
 
@@ -468,6 +481,8 @@ class Module extends BaseModule
      * @throws ErrorException
      */
     private function createLdapUser ($user) {
+        Yii::debug('Creating LDAP user...', __METHOD__);
+
         $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
             'cn' => $user->username,
         ]);
@@ -487,6 +502,8 @@ class Module extends BaseModule
 
         if (!$ldapUser->save()) {
             throw new ErrorException("Impossible to create the LDAP user");
+        } else {
+            Yii::info('Created LDAP user', __METHOD__);
         }
     }
 
