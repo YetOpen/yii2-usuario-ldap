@@ -3,7 +3,7 @@
 namespace yetopen\usuarioLdap;
 
 
-use yii\base\Exception;
+use Exception;
 
 /**
  * Class LdapConfigurationException
