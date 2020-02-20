@@ -240,6 +240,7 @@ class Module extends BaseModule
                 if ($this->createLocalUsers) {
                     $user = new User();
                     $user->username = $username;
+                    // TODO: use 'x' for _hash
                     $user->password = uniqid();
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
@@ -553,6 +554,8 @@ class Module extends BaseModule
             throw new ErrorException("Impossible to create the LDAP user");
         } else {
             Yii::info('Created LDAP user', __METHOD__);
+            $user->password_hash = 'x'; // impossible to create this hash
+            $user->save();
         }
     }
 
