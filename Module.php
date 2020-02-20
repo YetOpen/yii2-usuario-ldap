@@ -11,6 +11,7 @@ use Adldap\Schemas\ActiveDirectory;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
+use Da\User\Controller\RegistrationController;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
@@ -358,6 +359,11 @@ class Module extends BaseModule
                 // None of the presented cases at the moment is part of our specifications
             }
         });
+        Event::on(RegistrationController::class, UserEvent::EVENT_AFTER_CONFIRMATION, function (UserEvent $event) {
+            Yii::debug('LDAP after confirmation...', __METHOD__);
+            $user = $event->getUser();
+            $this->createLdapUser($user);
+        });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
             $user = $event->getUser();
 
@@ -402,6 +408,7 @@ class Module extends BaseModule
             try {
                 $ldapUser = $this->findLdapUser($user->username, 'cn');
             } catch (NoLdapUserException $e) {
+                Yii::error($e->getMessage(), __METHOD__);
                 // Unable to find the user in ldap, if I have the password in cleare I create it
                 // these case typically happens when the sync is enabled and we already have users
                 if (!empty($user->password)) {
@@ -417,6 +424,7 @@ class Module extends BaseModule
             if (!$ldapUser->save()) {
                 throw new ErrorException("Impossible to modify the LDAP user");
             }
+            Yii::info('LDAP Password reset completed', __METHOD__);
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
             $user = $event->getUser();
@@ -518,9 +526,15 @@ class Module extends BaseModule
     private function createLdapUser ($user) {
         Yii::debug('Creating LDAP user...', __METHOD__);
 
+        /* @var $ldapUser \Adldap\Models\User */
         $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
             'cn' => $user->username,
         ]);
+
+        // set user dn
+        $dn = "cn=$user->username".$this->ldapConfig['account_suffix'];
+        Yii::debug("DN: ".$dn, __METHOD__);
+        $ldapUser->setDn($dn);
 
         // Set LDAP user attributes from local user if changed
         foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
