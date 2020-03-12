@@ -404,6 +404,7 @@ class Module extends BaseModule
             }
         });
         Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
+            Yii::debug('After password reset', __METHOD__);
             $token = $event->getToken();
             $user = $token->user;
             try {
@@ -414,6 +415,7 @@ class Module extends BaseModule
                 // these case typically happens when the sync is enabled and we already have users
                 if (!empty($user->password)) {
                     $this->createLdapUser($user);
+                    Event::trigger(Module::class,LdapEvent::EVENT_AFTER_INITAL_PASSWORD_RESET);
                 }
                 return;
             }
@@ -425,6 +427,7 @@ class Module extends BaseModule
             if (!$ldapUser->save()) {
                 throw new ErrorException("Impossible to modify the LDAP user");
             }
+            Event::trigger(Module::class, LdapEvent::EVENT_AFTER_PASSWORD_RESET);
             Yii::info('LDAP Password reset completed', __METHOD__);
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
