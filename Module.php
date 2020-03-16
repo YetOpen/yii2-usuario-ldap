@@ -15,7 +15,7 @@ use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
 use Yii;
-use yii\base\Model as BaseModule;
+use yii\base\Component;
 use yii\base\Event;
 use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
@@ -39,7 +39,7 @@ use yii\helpers\VarDumper;
  *
  * @property array $mapUserARtoLDAPattr
  */
-class Module extends BaseModule
+class Module extends Component
 {
     /**
      * Stores the LDAP provider
@@ -150,6 +150,15 @@ class Module extends BaseModule
         // For second LDAP parameters use first one as default if not set
         if (is_null($this->secondLdapConfig)) $this->secondLdapConfig = $this->ldapConfig;
 
+        $this->events();
+
+        parent::init();
+    }
+
+    /**
+     * Instantiate the providers based on the application configuration
+     */
+    public function initAdLdap() {
         // Connect first LDAP
         $ad = new Adldap();
         $ad->addProvider($this->ldapConfig);
@@ -168,7 +177,7 @@ class Module extends BaseModule
                         // Sets a provider with the new account_suffix
                     } else {
                         // Rebuilds the base_dn
-                        $config['base_dn'] = "ou=".$otherOrganizationalUnit.$config['base_dn'].',';
+                        $config['base_dn'] = "ou={$otherOrganizationalUnit},{$config['base_dn']},";
                     }
                     // Sets a provider with the configuration
                     $ad->addProvider($config, $otherOrganizationalUnit);
@@ -180,6 +189,7 @@ class Module extends BaseModule
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to LDAP Server", $e);
+            parent::init();
             return;
         }
         // Connect second LDAP
@@ -190,14 +200,14 @@ class Module extends BaseModule
             $this->secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to the second LDAP Server", $e);
+            parent::init();
             return;
         }
-        $this->events();
-        parent::init();
     }
 
     public function events() {
         Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
+            $this->initAdLdap();
             /* @var $provider Provider */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
             $form = $event->getForm();
@@ -319,6 +329,7 @@ class Module extends BaseModule
             return Yii::$app->getResponse()->redirect(Yii::$app->request->referrer)->send();
         });
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
+            $this->initAdLdap();
             /**
              * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
              * If the the uurlser is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
@@ -342,6 +353,7 @@ class Module extends BaseModule
             return;
         }
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
+            $this->initAdLdap();
             /**
              * After a successful login if no LDAP user is found I create it.
              * Is the only point where I can have the user password in clear for existing users
@@ -360,6 +372,7 @@ class Module extends BaseModule
             }
         });
         Event::on(AdminController::class, UserEvent::EVENT_AFTER_CREATE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
             try {
                 $this->createLdapUser($user);
@@ -373,6 +386,7 @@ class Module extends BaseModule
             }
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
 
             // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
@@ -411,6 +425,7 @@ class Module extends BaseModule
             }
         });
         Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
+            $this->initAdLdap();
             $token = $event->getToken();
             $user = $token->user;
             try {
@@ -433,6 +448,7 @@ class Module extends BaseModule
             }
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
             try {
                 $ldapUser = $this->findLdapUser($user->username, 'cn');
