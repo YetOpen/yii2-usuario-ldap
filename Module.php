@@ -200,6 +200,12 @@ class Module extends BaseModule
                 return;
             }
 
+            // Validate form before trying authentication
+            // TODO: could be moved down, but has to be done before user->login
+            if (!$form->validate()) {
+                return;
+            }
+
             // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
             if (!$this->tryAuthentication($provider, $username, $password)) {
                 $failed = TRUE;
