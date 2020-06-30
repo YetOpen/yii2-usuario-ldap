@@ -5,6 +5,7 @@ namespace dmstr\usuarioLdapExtension;
 use Adldap\Adldap;
 use Adldap\AdldapException;
 use Adldap\Connections\Provider;
+use Adldap\Models\Model;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
@@ -26,7 +27,7 @@ use yii\db\ActiveRecord;
  * Class Module
  * @package dmstr\usuarioLdapExtension
  *
- * @property Adldap $ldapProvider
+ * @property Provider $ldapProvider
  * @property Adldap $secondLdapProvider
  * @property array $ldapConfig
  * @property array $secondLdapConfig
@@ -43,7 +44,7 @@ class UsuarioLdapComponent extends Component
 {
     /**
      * Stores the LDAP provider
-     * @var Adldap
+     * @var Provider
      */
     public $ldapProvider;
 
@@ -118,7 +119,7 @@ class UsuarioLdapComponent extends Component
      * It's required when $allowPasswordRecovery is set to FALSE.
      * @var null | string | array
      */
-    public $passwordRecoveryRedirect = NULL;
+    public $passwordRecoveryRedirect;
 
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
@@ -608,5 +609,34 @@ class UsuarioLdapComponent extends Component
         if(!isset($this->ldapConfig['account_suffix'])) {
             throw new LdapConfigurationErrorException(OpenLDAP::class.' requires an account suffix');
         }
+    }
+
+    /**
+     * @param string $username
+     *
+     * @return Model|null
+     */
+    public function userByUsername(string $username): ?Model {
+        return $this->ldapProvider->search()->whereEquals('cn', $username)->first();
+    }
+
+    /**
+     * @param string $username
+     *
+     * @return bool
+     */
+    public function userIsLdapUser(string $username): bool
+    {
+        return $this->userByUsername($username) !== null;
+    }
+
+    public function updateUserAttribute(string $username, string $attributeName, $newValue): bool
+    {
+        $ldapUser = \Yii::$app->usuarioLdap->userByUsername($username);
+        if ($ldapUser) {
+            $ldapUser->setAttribute($attributeName, $newValue);
+            return $ldapUser->save();
+        }
+        return false;
     }
 }
