@@ -5,9 +5,7 @@ namespace dmstr\usuarioLdapExtension;
 use Adldap\Adldap;
 use Adldap\AdldapException;
 use Adldap\Connections\Provider;
-use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\User as AdldapUser;
-use Adldap\Schemas\ActiveDirectory;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
@@ -17,10 +15,8 @@ use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
-use dmstr\usuarioLdapExtension\NoLdapUserException;
-use dmstr\usuarioLdapExtension\RoleNotFoundException;
 use Yii;
-use yii\base\Model as BaseModule;
+use yii\base\Component;
 use yii\base\Event;
 use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
@@ -43,7 +39,7 @@ use yii\db\ActiveRecord;
  *
  * @property array $mapUserARtoLDAPattr
  */
-class Module extends BaseModule
+class UsuarioLdapComponent extends Component
 {
     /**
      * Stores the LDAP provider
