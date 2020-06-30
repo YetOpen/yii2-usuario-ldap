@@ -9,13 +9,13 @@ The preferred way to install this extension is through [composer](http://getcomp
 Either run:
 
 ```
-php composer.phar require --prefer-dist yetopen/yii2-usuario-ldap "*"
+php composer.phar require --prefer-dist dmstr/yii2-usuario-ldap-extension "*"
 ```
 
 or add
 
 ```
-"yetopen/yii2-usuario-ldap": "*"
+"dmstr/yii2-usuario-ldap-extension": "*"
 ```
 
 to the require section of your `composer.json` file.
@@ -31,7 +31,7 @@ Add in your config (`config/web.php` for the basic app):
 'components' => [
     //...
     'usuarioLdap' => [
-        'class' => 'yetopen\usuarioLdap\Module',
+        'class' => 'dmstr\usuarioLdapExtension\Module',
         'ldapConfig' => [
             'hosts' => ['host.example.com'],
             'base_dn' => 'dc=mydomain,dc=local',

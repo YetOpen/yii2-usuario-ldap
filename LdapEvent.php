@@ -1,7 +1,7 @@
 <?php
 
 
-namespace yetopen\usuarioLdap;
+namespace dmstr\usuarioLdapExtension;
 
 
 class LdapEvent

@@ -1,6 +1,6 @@
 {
-    "name": "yetopen/yii2-usuario-ldap",
-    "description": "An Yii2 extension to add LDAP auth (and sync) to yii2-usuario",
+    "name": "dmstr/yii2-usuario-extension",
+    "description": "Permantent fork from yetopen/yii2-usuario-ldap",
     "type": "yii2-extension",
     "minimum-stability": "stable",
     "keywords": ["yii2","extension","usuario","ldap"],
@@ -13,6 +13,10 @@
         {
             "name": "Liviu Calin",
             "email": "liviu.calin@yetopen.it"
+        },
+        {
+            "name": "Elias Luhr",
+            "email": "e.luhr@herzogkommunikation.de"
         }
     ],
     "require": {
@@ -22,7 +26,7 @@
     },
     "autoload": {
         "psr-4": {
-            "yetopen\\usuarioLdap\\": ""
+            "dmstr\\usuarioLdapExtension\\": ""
         }
     }
 }

@@ -1,6 +1,6 @@
 <?php
 
-namespace yetopen\usuarioLdap;
+namespace dmstr\usuarioLdapExtension;
 
 use Exception;
 

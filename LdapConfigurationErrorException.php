@@ -1,13 +1,13 @@
 <?php
 
-namespace yetopen\usuarioLdap;
+namespace dmstr\usuarioLdapExtension;
 
 
 use Exception;
 
 /**
  * Class LdapConfigurationException
- * @package yetopen\usuarioLdap
+ * @package dmstr\usuarioLdapExtension
  */
 class LdapConfigurationErrorException extends Exception
 {

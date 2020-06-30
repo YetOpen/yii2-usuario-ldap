@@ -1,12 +1,12 @@
 <?php
 
-namespace yetopen\usuarioLdap;
+namespace dmstr\usuarioLdapExtension;
 
 use Exception;
 
 /**
  * Class MultipleUsersFoundException
- * @package yetopen\usuarioLdap
+ * @package dmstr\usuarioLdapExtension
  */
 class MultipleUsersFoundException extends Exception
 {
