@@ -1,5 +1,5 @@
 {
-    "name": "dmstr/yii2-usuario-extension",
+    "name": "dmstr/yii2-usuario-ldap-extension",
     "description": "Permantent fork from yetopen/yii2-usuario-ldap",
     "type": "yii2-extension",
     "minimum-stability": "stable",
