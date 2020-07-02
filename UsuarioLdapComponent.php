@@ -24,7 +24,7 @@ use Da\User\Event\FormEvent;
 use yii\db\ActiveRecord;
 
 /**
- * Class Module
+ * Class UsuarioLdapComponent
  * @package dmstr\usuarioLdapExtension
  *
  * @property Provider $ldapProvider
@@ -283,8 +283,7 @@ class UsuarioLdapComponent extends Component
                         $user->confirmed_at = time();
                         if (!$user->save()) {
                             Yii::error('Could not create default user', __METHOD__);
-                            var_dump($user->getErrors());
-                            die;
+                            Yii::error($user->getErrors(), __METHOD__);
                             //FIXME handle save error
                             return;
                         }
@@ -416,7 +415,7 @@ class UsuarioLdapComponent extends Component
                 // these case typically happens when the sync is enabled and we already have users
                 if (!empty($user->password)) {
                     $this->createLdapUser($user);
-                    Event::trigger(Module::class,LdapEvent::EVENT_AFTER_INITAL_PASSWORD_RESET);
+                    Event::trigger(UsuarioLdapComponent::class,LdapEvent::EVENT_AFTER_INITAL_PASSWORD_RESET);
                 }
                 return;
             }
@@ -428,7 +427,7 @@ class UsuarioLdapComponent extends Component
             if (!$ldapUser->save()) {
                 throw new ErrorException("Impossible to modify the LDAP user");
             }
-            Event::trigger(Module::class, LdapEvent::EVENT_AFTER_PASSWORD_RESET);
+            Event::trigger(UsuarioLdapComponent::class, LdapEvent::EVENT_AFTER_PASSWORD_RESET);
             Yii::info('LDAP Password reset completed', __METHOD__);
         });
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
