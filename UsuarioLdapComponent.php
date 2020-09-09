@@ -241,7 +241,7 @@ class UsuarioLdapComponent extends Component
             $user = User::findOne(['username' => $username]);
             if (empty($user)) {
                 if ($this->createLocalUsers) {
-                    $user = new User();
+                    $user = Yii::createObject(User::class);
                     $user->username = $username;
                     // TODO: use 'x' for _hash
                     $user->password = uniqid();
@@ -277,7 +277,7 @@ class UsuarioLdapComponent extends Component
                     $user = User::findOne($this->defaultUserId);
                     if (empty($user)) {
                         // The default User wasn't found, it has to be created
-                        $user = new User();
+                        $user = Yii::createObject(User::class);
                         $user->id = $this->defaultUserId;
                         $user->email = "default@user.com";
                         $user->confirmed_at = time();
