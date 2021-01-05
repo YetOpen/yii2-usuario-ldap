@@ -188,7 +188,7 @@ class Module extends Component
             }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
-            $this->error("Error connecting to LDAP Server", $e);
+            $this->error("Error connecting to LDAP Server", $e->getMessage());
             parent::init();
             return;
         }
@@ -326,7 +326,7 @@ class Module extends Component
             Yii::$app->getUser()->login($userIdentity, $duration);
             Yii::$app->session->set($this->sessionKeyForUsername, $user->username);
             Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
-            return Yii::$app->getResponse()->redirect(Yii::$app->request->referrer)->send();
+            return Yii::$app->controller->goBack()->send();
         });
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
             $this->initAdLdap();
