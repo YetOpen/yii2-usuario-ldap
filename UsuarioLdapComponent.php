@@ -234,7 +234,7 @@ class UsuarioLdapComponent extends Component
             if(is_null($ldap_user)) {
                 throw new NoLdapUserException("Impossible to find LDAP user");
             }
-            $username = $ldap_user->getAttribute('uid')[0];
+            $username = $ldap_user->getAttribute('uid')[0] ?? null;
             if (empty($username)) {
                 $username = $username_inserted;
             }
