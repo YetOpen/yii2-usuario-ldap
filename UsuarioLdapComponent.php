@@ -510,7 +510,7 @@ class UsuarioLdapComponent extends Component
             ->first();
 
         if (empty($ldapUser)) {
-            throw new NoLdapUserException();
+            throw new NoLdapUserException("LDAP user $username ($key) not found");
         }
 
         if (is_array($ldapUser)) {

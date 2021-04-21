@@ -10,5 +10,5 @@ use Exception;
  */
 class MultipleUsersFoundException extends Exception
 {
-
+    public $message = "Multiple LDAP users found";
 }
