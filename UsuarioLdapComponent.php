@@ -305,6 +305,8 @@ class UsuarioLdapComponent extends Component
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
             Yii::$app->getUser()->login($userIdentity, $duration);
         });
+
+
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
             /**
              * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
@@ -319,11 +321,15 @@ class UsuarioLdapComponent extends Component
                 Yii::$app->end();
             }
         });
+
+        // -------------------------------------------------------------------------------------------------------------
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
         }
         Yii::debug('Registering LDAP sync events...', __METHOD__);
+
+
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
             /**
              * After a successful login if no LDAP user is found I create it.
@@ -346,7 +352,9 @@ class UsuarioLdapComponent extends Component
                 Yii::debug(['User information', $user], __METHOD__);
                 $this->createLdapUser($user);
             }
-        });
+        }, null, false);
+
+
         Event::on(AdminController::class, UserEvent::EVENT_AFTER_CREATE, function (UserEvent $event) {
             $user = $event->getUser();
             try {
@@ -359,12 +367,17 @@ class UsuarioLdapComponent extends Component
                 // * local users sync is enabled with an already populated LDAP and somebody tries to create a user with an existing username in LDAP
                 // None of the presented cases at the moment is part of our specifications
             }
-        });
+        }, null, false);
+
+
+        // Write user to LDAP after confirmation (high-priority event/do not append)
         Event::on(RegistrationController::class, UserEvent::EVENT_AFTER_CONFIRMATION, function (UserEvent $event) {
-            Yii::debug('LDAP after confirmation...', __METHOD__);
+            Yii::debug('Event after confirmation...', __METHOD__);
             $user = $event->getUser();
             $this->createLdapUser($user);
-        });
+        }, null, false);
+
+
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
             $user = $event->getUser();
 
@@ -402,7 +415,9 @@ class UsuarioLdapComponent extends Component
                     throw new ErrorException("Impossible to rename the LDAP user");
                 }
             }
-        });
+        }, null, false);
+
+
         Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
             Yii::debug('After password reset', __METHOD__);
             $token = $event->getToken();
@@ -429,7 +444,9 @@ class UsuarioLdapComponent extends Component
             }
             Event::trigger(UsuarioLdapComponent::class, LdapEvent::EVENT_AFTER_PASSWORD_RESET);
             Yii::info('LDAP Password reset completed', __METHOD__);
-        });
+        }, null, false);
+
+        // Delete LDAP user (run as last event)
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
             $user = $event->getUser();
             try {
