@@ -474,7 +474,7 @@ class Module extends Component
      * @throws \Adldap\Auth\UsernameRequiredException
      */
     private function tryAuthentication($provider, $username, $password) {
-        $this->info("Trying authentication for {$username} with provider", $provider);
+        $this->info("Trying authentication for {$username} with provider", $provider->getSchema());
         // Tries to authenticate the user with the standard configuration
         if($provider->auth()->attempt($username, $password)) {
             $this->info("User successfully authenticated");
