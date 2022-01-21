@@ -14,6 +14,7 @@ use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
 use ErrorException;
+use yetopen\helpers\ArrayHelper;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
@@ -253,7 +254,7 @@ class Module extends Component
             if(is_null($ldap_user)) {
                 throw new NoLdapUserException("Impossible to find LDAP user");
             }
-            $username = $ldap_user->getAttribute('uid')[0];
+            $username = ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
             if (empty($username)) {
                 $username = $username_inserted;
             }
