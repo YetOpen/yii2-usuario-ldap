@@ -1,6 +1,6 @@
 <?php
 
-namespace yetopen\usuarioLdap;
+namespace dmstr\usuarioLdapExtension;
 
 use Exception;
 
@@ -9,5 +9,5 @@ use Exception;
  */
 class NoLdapUserException extends Exception
 {
-
+    public $message = "LDAP user not found";
 }
