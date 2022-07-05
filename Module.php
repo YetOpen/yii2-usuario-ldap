@@ -7,6 +7,7 @@ use Adldap\AdldapException;
 use Adldap\Connections\Provider;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
+use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Event\ResetPasswordEvent;
@@ -190,8 +191,7 @@ class Module extends Component
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to LDAP Server", $e->getMessage());
-            parent::init();
-            return;
+            throw new LdapConfigurationErrorException($e->getMessage());
         }
         // Connect second LDAP
         $ad2 = new Adldap();
@@ -201,9 +201,9 @@ class Module extends Component
             $this->secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to the second LDAP Server", $e);
-            parent::init();
-            return;
+            throw new LdapConfigurationErrorException($e->getMessage());
         }
+        parent::init();
     }
 
     public function events() {
@@ -389,41 +389,12 @@ class Module extends Component
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
             $this->initAdLdap();
             $user = $event->getUser();
-
-            // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
-            $username = $user->oldAttributes['username'];
-            try {
-                $ldapUser = $this->findLdapUser($username, 'cn');
-            } catch (NoLdapUserException $e) {
-                // Unable to find the user in ldap, if I have the password in cleare I create it
-                // these case typically happens when the sync is enabled and we already have users
-                if (!empty($user->password)) {
-                    $this->createLdapUser($user);
-                }
-                return;
-            }
-
-            // Set LDAP user attributes from local user if changed
-            foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
-                if ($user->isAttributeChanged($userAttr)) {
-                    $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
-                }
-            }
-            if (!empty($user->password)) {
-                // If clear password is specified I update it also in LDAP
-                $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
-            }
-
-            if (!$ldapUser->save()) {
-                throw new ErrorException("Impossible to modify the LDAP user");
-            }
-
-            if ($username != $user->username) {
-                // If username is changed the procedure to change the cn in LDAP is the following
-                if (!$ldapUser->rename("cn={$user->username}")) {
-                    throw new ErrorException("Impossible to rename the LDAP user");
-                }
-            }
+            $this->updateLdapUser($user);
+        });
+        Event::on(SettingsController::class, UserEvent::EVENT_AFTER_ACCOUNT_UPDATE, function (UserEvent $event) {
+            $this->initAdLdap();
+            $user = $event->getUser();
+            $this->updateLdapUser($user);
         });
         Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
             $this->initAdLdap();
@@ -578,6 +549,50 @@ class Module extends Component
 
         if (!$ldapUser->save()) {
             throw new ErrorException("Impossible to create the LDAP user");
+        }
+    }
+
+    /**
+     * @param User $user
+     * @return void
+     * @throws ErrorException
+     * @throws MultipleUsersFoundException
+     */
+    private function updateLdapUser($user)
+    {
+        // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
+        $username = $user->oldAttributes['username'];
+        try {
+            $ldapUser = $this->findLdapUser($username, 'cn');
+        } catch (NoLdapUserException $e) {
+            // Unable to find the user in ldap, if I have the password in cleare I create it
+            // these case typically happens when the sync is enabled and we already have users
+            if (!empty($user->password)) {
+                $this->createLdapUser($user);
+            }
+            return;
+        }
+
+        // Set LDAP user attributes from local user if changed
+        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
+            if ($user->isAttributeChanged($userAttr)) {
+                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+            }
+        }
+        if (!empty($user->password)) {
+            // If clear password is specified I update it also in LDAP
+            $ldapUser->setAttribute('userPassword', '{SHA}' . base64_encode(pack('H*', sha1($user->password))));
+        }
+
+        if (!$ldapUser->save()) {
+            throw new ErrorException("Impossible to modify the LDAP user");
+        }
+
+        if ($username != $user->username) {
+            // If username is changed the procedure to change the cn in LDAP is the following
+            if (!$ldapUser->rename("cn={$user->username}")) {
+                throw new ErrorException("Impossible to rename the LDAP user");
+            }
         }
     }
 
