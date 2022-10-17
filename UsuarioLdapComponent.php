@@ -1,6 +1,6 @@
 <?php
 
-namespace dmstr\usuarioLdapExtension;
+namespace yetopen\usuarioLdap;
 
 use Adldap\Adldap;
 use Adldap\AdldapException;
@@ -25,7 +25,7 @@ use yii\db\ActiveRecord;
 
 /**
  * Class UsuarioLdapComponent
- * @package dmstr\usuarioLdapExtension
+ * @package yetopen\usuarioLdap
  *
  * @property Provider $ldapProvider
  * @property Adldap $secondLdapProvider
@@ -519,7 +519,7 @@ class UsuarioLdapComponent extends Component
      * @param $username
      * @param string $key
      * @return mixed
-     * @throws \dmstr\usuarioLdapExtension\NoLdapUserException
+     * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
     private function findLdapUser ($username, $key, $ldapProvider = 'secondLdapProvider') {
         $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
