@@ -8,6 +8,7 @@ use Adldap\Connections\Provider;
 use Adldap\Models\Model;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
+use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
@@ -22,12 +23,13 @@ use yii\base\Event;
 use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
 use yii\db\ActiveRecord;
+use yii\helpers\VarDumper;
 
 /**
- * Class UsuarioLdapComponent
+ * Class Module
  * @package yetopen\usuarioLdap
  *
- * @property Provider $ldapProvider
+ * @property Adldap $ldapProvider
  * @property Adldap $secondLdapProvider
  * @property array $ldapConfig
  * @property array $secondLdapConfig
@@ -44,7 +46,7 @@ class UsuarioLdapComponent extends Component
 {
     /**
      * Stores the LDAP provider
-     * @var Provider
+     * @var Adldap
      */
     public $ldapProvider;
 
@@ -94,6 +96,13 @@ class UsuarioLdapComponent extends Component
     public $defaultUserId = -1;
 
     /**
+     * Specify a session key where to save the LDAP username in case of LDAP authentication
+     * set NULL in order to not save the username in session
+     * @var string
+     */
+    public $sessionKeyForUsername = 'ldap_username';
+
+    /**
      * @var null|string
      */
     public $userIdentificationLdapAttribute = NULL;
@@ -119,7 +128,13 @@ class UsuarioLdapComponent extends Component
      * It's required when $allowPasswordRecovery is set to FALSE.
      * @var null | string | array
      */
-    public $passwordRecoveryRedirect;
+    public $passwordRecoveryRedirect = NULL;
+
+    /**
+     * It's the category of all the logs of the module, defaults to 'YII2_USUARIO_LDAP'
+     * @var string
+     */
+    public $logCategory = 'YII2_USUARIO_LDAP';
 
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
@@ -138,6 +153,15 @@ class UsuarioLdapComponent extends Component
         // For second LDAP parameters use first one as default if not set
         if (is_null($this->secondLdapConfig)) $this->secondLdapConfig = $this->ldapConfig;
 
+        $this->events();
+        $this->initAdLdap();
+        parent::init();
+    }
+
+    /**
+     * Instantiate the providers based on the application configuration
+     */
+    public function initAdLdap() {
         // Connect first LDAP
         $ad = new Adldap();
         $ad->addProvider($this->ldapConfig);
@@ -156,7 +180,7 @@ class UsuarioLdapComponent extends Component
                         // Sets a provider with the new account_suffix
                     } else {
                         // Rebuilds the base_dn
-                        $config['base_dn'] = "ou=".$otherOrganizationalUnit.$config['base_dn'].',';
+                        $config['base_dn'] = "ou={$otherOrganizationalUnit},{$config['base_dn']},";
                     }
                     // Sets a provider with the configuration
                     $ad->addProvider($config, $otherOrganizationalUnit);
@@ -167,7 +191,8 @@ class UsuarioLdapComponent extends Component
             }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
-            return;
+            $this->error("Error connecting to LDAP Server", $e->getMessage());
+            throw new LdapConfigurationErrorException($e->getMessage());
         }
         // Connect second LDAP
         $ad2 = new Adldap();
@@ -176,15 +201,16 @@ class UsuarioLdapComponent extends Component
             $ad2->connect();
             $this->secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
-            var_dump($e);
-            die;
+            $this->error("Error connecting to the second LDAP Server", $e);
+            throw new LdapConfigurationErrorException($e->getMessage());
         }
-        $this->events();
+        $this->events(); // TODO (Elias): Check
         parent::init();
     }
 
     public function events() {
         Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
+            $this->initAdLdap();
             /* @var $provider Provider */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
             $form = $event->getForm();
@@ -194,6 +220,7 @@ class UsuarioLdapComponent extends Component
 
             // If somehow username or password are empty, lets usuario handle it
             if(empty($username) || empty($password)) {
+                $this->info("Either username or password was not specified");
                 return;
             }
 
@@ -216,6 +243,7 @@ class UsuarioLdapComponent extends Component
                     }
                 }
                 if($failed) {
+                    $this->warning("Authentication failed");
                     // Failed.
                     return;
                 }
@@ -240,17 +268,18 @@ class UsuarioLdapComponent extends Component
             }
             $user = User::findOne(['username' => $username]);
             if (empty($user)) {
+                $this->info("User not found in the application database");
                 if ($this->createLocalUsers) {
+                    $this->info("The user will be created");
                     $user = Yii::createObject(User::class);
                     $user->username = $username;
-                    // TODO: use 'x' for _hash
                     $user->password = uniqid();
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
                     $user->confirmed_at = time();
                     if (!$user->save()) {
+                        $this->error("Error saving the new user in the database", $user->errors);
                         // FIXME handle save error
-                        Yii::error('Could not create local user',__METHOD__);
                         return;
                     }
 
@@ -259,8 +288,8 @@ class UsuarioLdapComponent extends Component
                     $profile->name = $ldap_user->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
+                        $this->error("Error saving the new profile in the database", $profile->errors);
                         // FIXME handle save error
-                        Yii::error('Could not create local profile', __METHOD__);
                     }
 
                     if ($this->defaultRoles !== FALSE) {
@@ -274,6 +303,7 @@ class UsuarioLdapComponent extends Component
                     // Triggers the EVENT_AFTER_CREATE event
                     $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
                 } else {
+                    $this->info("The user will be logged using the default user");
                     $user = User::findOne($this->defaultUserId);
                     if (empty($user)) {
                         // The default User wasn't found, it has to be created
@@ -282,8 +312,7 @@ class UsuarioLdapComponent extends Component
                         $user->email = "default@user.com";
                         $user->confirmed_at = time();
                         if (!$user->save()) {
-                            Yii::error('Could not create default user', __METHOD__);
-                            Yii::error($user->getErrors(), __METHOD__);
+                            $this->error("Error creating the default user", $user->errors);
                             //FIXME handle save error
                             return;
                         }
@@ -304,10 +333,13 @@ class UsuarioLdapComponent extends Component
             $userIdentity = User::findIdentity($user->id);
             $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
             Yii::$app->getUser()->login($userIdentity, $duration);
+            Yii::$app->session->set($this->sessionKeyForUsername, $user->username);
+            Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
+            return Yii::$app->controller->goBack()->send();
         });
 
-
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
+            $this->initAdLdap();
             /**
              * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
              * If the the uurlser is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
@@ -315,47 +347,48 @@ class UsuarioLdapComponent extends Component
              */
             $form = $event->getForm();
             $email = $form->email;
-            $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+            try {
+                $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+            } catch (NoLdapUserException $e) {
+                $this->info("User $email not found");
+                return;
+            }
             if(!is_null($ldapUser) && !$this->allowPasswordRecovery) {
                 Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
                 Yii::$app->end();
             }
         });
-
-        // -------------------------------------------------------------------------------------------------------------
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
         }
-        Yii::debug('Registering LDAP sync events...', __METHOD__);
-
 
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
+            $this->initAdLdap();
             /**
              * After a successful login if no LDAP user is found I create it.
              * Is the only point where I can have the user password in clear for existing users
              * and sync them to LDAP
              */
-            Yii::debug('Create user after successful login...', __METHOD__);
+            /** @var \Da\User\Form\LoginForm $form */
             $form = $event->getForm();
-
             $username = $form->login;
             try {
-                Yii::debug('Searching LDAP user...', __METHOD__);
                 $ldapUser = $this->findLdapUser($username, 'cn');
-                Yii::debug(['Result for LDAP user', $ldapUser], __METHOD__);
+                $this->info('Result for LDAP user', $ldapUser);
+
             } catch (NoLdapUserException $e) {
                 $password = $form->password;
-                $user = User::findOne(['username' => $username]);
-                Yii::debug($user, __METHOD__);return;
+                $user = $form->getUser();
                 $user->password = $password;
-                Yii::debug(['User information', $user], __METHOD__);
+                $this->info('User information', $user);
                 $this->createLdapUser($user);
             }
         }, null, false);
 
 
         Event::on(AdminController::class, UserEvent::EVENT_AFTER_CREATE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
             try {
                 $this->createLdapUser($user);
@@ -372,13 +405,18 @@ class UsuarioLdapComponent extends Component
 
         // Write user to LDAP after confirmation (high-priority event/do not append)
         Event::on(RegistrationController::class, UserEvent::EVENT_AFTER_CONFIRMATION, function (UserEvent $event) {
-            Yii::debug('Event after confirmation...', __METHOD__);
             $user = $event->getUser();
             $this->createLdapUser($user);
         }, null, false);
 
 
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
+            $this->initAdLdap();
+            $user = $event->getUser();
+            $this->updateLdapUser($user);
+        });
+        Event::on(SettingsController::class, UserEvent::EVENT_AFTER_ACCOUNT_UPDATE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
 
             // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
@@ -409,7 +447,7 @@ class UsuarioLdapComponent extends Component
                 throw new ErrorException("Impossible to modify the LDAP user");
             }
 
-            if ($username != $user->username) {
+            if ($username !== $user->username) {
                 // If username is changed the procedure to change the cn in LDAP is the following
                 if (!$ldapUser->rename("cn={$user->username}")) {
                     throw new ErrorException("Impossible to rename the LDAP user");
@@ -419,8 +457,12 @@ class UsuarioLdapComponent extends Component
 
 
         Event::on(RecoveryController::class, ResetPasswordEvent::EVENT_AFTER_RESET, function (ResetPasswordEvent $event) {
-            Yii::debug('After password reset', __METHOD__);
+            $this->initAdLdap();
             $token = $event->getToken();
+            if (!$token) {
+                $this->error('Token does not exist', $token);
+                return;
+            }
             $user = $token->user;
             try {
                 $ldapUser = $this->findLdapUser($user->username, 'cn');
@@ -443,11 +485,11 @@ class UsuarioLdapComponent extends Component
                 throw new ErrorException("Impossible to modify the LDAP user");
             }
             Event::trigger(UsuarioLdapComponent::class, LdapEvent::EVENT_AFTER_PASSWORD_RESET);
-            Yii::info('LDAP Password reset completed', __METHOD__);
         }, null, false);
 
         // Delete LDAP user (run as last event)
         Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_DELETE, function (UserEvent $event) {
+            $this->initAdLdap();
             $user = $event->getUser();
             try {
                 $ldapUser = $this->findLdapUser($user->username, 'cn');
@@ -467,16 +509,24 @@ class UsuarioLdapComponent extends Component
      * @param $username string
      * @param $password string
      * @return boolean
+     * @throws MultipleUsersFoundException
      * @throws \Adldap\Auth\BindException
      * @throws \Adldap\Auth\PasswordRequiredException
      * @throws \Adldap\Auth\UsernameRequiredException
      */
     private function tryAuthentication($provider, $username, $password) {
-        Yii::debug('Trying LDAP authentication...', __METHOD__);
+        $this->info("Trying authentication for {$username} with provider", $provider->getSchema());
         // Tries to authenticate the user with the standard configuration
         if($provider->auth()->attempt($username, $password)) {
+            $this->info("User successfully authenticated");
             return TRUE;
         }
+        // If the suffix was not specified it is impossibile to search for another attribute
+        if(empty($this->ldapConfig['account_suffix'])) {
+            return FALSE;
+        }
+
+        $this->info("Default authentication didn't work, it will be tried again with another attribute");
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
@@ -490,9 +540,10 @@ class UsuarioLdapComponent extends Component
             break;
         }
         if(is_null($user)) {
-            Yii::info('LDAP user not found', __METHOD__);
+            $this->warning("Couldn't find the user using another attribute");
             return FALSE;
         }
+        $this->info("Found user with attribute `$ldapAttr`");
 
         // Gets the user authentication attribute from the distinguished name
         $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
@@ -503,22 +554,29 @@ class UsuarioLdapComponent extends Component
         $config['account_prefix'] = $prefix['prefix']."=";
         $userAuth = $user->getAttribute($prefix['prefix'], 0);
 
-        // The provider configuration needs to be reset with the new account_prefix
-        $provider->setConfiguration($config);
-        $provider->connect();
-        $success = FALSE;
-        if($provider->auth()->attempt($userAuth, $password)) {
-            $success = TRUE;
+        try {
+            // The provider configuration needs to be reset with the new account_prefix
+            $provider->setConfiguration($config);
+            $provider->connect();
+            $success = FALSE;
+            if($provider->auth()->attempt($userAuth, $password)) {
+                $success = TRUE;
+            }
+            $provider->setConfiguration($this->ldapConfig);
+            $provider->connect();
+        } catch (\Exception $e) {
+            Yii::error($e->getMessage(), __METHOD__);
+            $success = false;
         }
-        $provider->setConfiguration($this->ldapConfig);
-        $provider->connect();
         return $success;
     }
 
     /**
      * @param $username
      * @param string $key
+     * @param string $ldapProvider
      * @return mixed
+     * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
     private function findLdapUser ($username, $key, $ldapProvider = 'secondLdapProvider') {
@@ -545,8 +603,6 @@ class UsuarioLdapComponent extends Component
      * @throws ErrorException
      */
     private function createLdapUser ($user) {
-        Yii::debug('Creating LDAP user...', __METHOD__);
-
         /* @var $ldapUser \Adldap\Models\User */
         $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
             'cn' => $user->username,
@@ -554,7 +610,6 @@ class UsuarioLdapComponent extends Component
 
         // set user dn
         $dn = "cn=$user->username".$this->ldapConfig['account_suffix'];
-        Yii::debug("DN: ".$dn, __METHOD__);
         $ldapUser->setDn($dn);
 
         // Set LDAP user attributes from local user if changed
@@ -572,10 +627,50 @@ class UsuarioLdapComponent extends Component
 
         if (!$ldapUser->save()) {
             throw new ErrorException("Impossible to create the LDAP user");
-        } else {
-            Yii::info('Created LDAP user', __METHOD__);
-            $user->password_hash = 'x'; // impossible to create this hash
-            $user->save();
+        }
+    }
+
+    /**
+     * @param User $user
+     * @return void
+     * @throws ErrorException
+     * @throws MultipleUsersFoundException
+     */
+    private function updateLdapUser($user)
+    {
+        // Use the old username to find the LDAP user because it could be modified and in LDAP I still have the old one
+        $username = $user->oldAttributes['username'];
+        try {
+            $ldapUser = $this->findLdapUser($username, 'cn');
+        } catch (NoLdapUserException $e) {
+            // Unable to find the user in ldap, if I have the password in cleare I create it
+            // these case typically happens when the sync is enabled and we already have users
+            if (!empty($user->password)) {
+                $this->createLdapUser($user);
+            }
+            return;
+        }
+
+        // Set LDAP user attributes from local user if changed
+        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
+            if ($user->isAttributeChanged($userAttr)) {
+                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
+            }
+        }
+        if (!empty($user->password)) {
+            // If clear password is specified I update it also in LDAP
+            $ldapUser->setAttribute('userPassword', '{SHA}' . base64_encode(pack('H*', sha1($user->password))));
+        }
+
+        if (!$ldapUser->save()) {
+            throw new ErrorException("Impossible to modify the LDAP user");
+        }
+
+        if ($username != $user->username) {
+            // If username is changed the procedure to change the cn in LDAP is the following
+            if (!$ldapUser->rename("cn={$user->username}")) {
+                throw new ErrorException("Impossible to rename the LDAP user");
+            }
         }
     }
 
@@ -628,6 +723,42 @@ class UsuarioLdapComponent extends Component
     }
 
     /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function error($message, $object = NULL) {
+        $this->log('error', $message, $object);
+    }
+
+    /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function warning($message, $object = NULL) {
+        $this->log('warning', $message, $object);
+    }
+
+    /**
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function info($message, $object = NULL) {
+        $this->log('info', $message, $object);
+    }
+
+    /**
+     * @param $level string
+     * @param $message string
+     * @param null $object If specified it will be dumped and concatenated to the message after ": "
+     */
+    private function log($level, $message, $object) {
+        if(!empty($object)) {
+            $message .= ": ".VarDumper::dumpAsString($object);
+        }
+        Yii::$level($message, $this->logCategory);
+    }
+
+    /**
      * @param string $username
      *
      * @return Model|null
@@ -655,4 +786,5 @@ class UsuarioLdapComponent extends Component
         }
         return false;
     }
+
 }
