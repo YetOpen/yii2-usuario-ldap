@@ -1,5 +1,5 @@
 {
-    "name": "yetopen/yii2-usuario-ldap-extension",
+    "name": "yetopen/yii2-usuario-ldap",
     "description": "An Yii2 extension to add LDAP auth (and sync) to yii2-usuario",
     "type": "yii2-extension",
     "minimum-stability": "stable",
