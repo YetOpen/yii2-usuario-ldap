@@ -9,13 +9,13 @@ The preferred way to install this extension is through [composer](http://getcomp
 Either run:
 
 ```
-php composer.phar require --prefer-dist dmstr/yii2-usuario-ldap-extension "*"
+php composer.phar require --prefer-dist yetopen/yii2-usuario-ldap-extension "*"
 ```
 
 or add
 
 ```
-"dmstr/yii2-usuario-ldap-extension": "*"
+"yetopen/yii2-usuario-ldap-extension": "*"
 ```
 
 to the require section of your `composer.json` file.
