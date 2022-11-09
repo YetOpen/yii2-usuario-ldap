@@ -30,8 +30,8 @@ use yii\helpers\VarDumper;
  *
  * @package yetopen\usuarioLdap
  *
- * @property Adldap|null $ldapProvider
- * @property Adldap|null $secondLdapProvider
+ * @property Adldap|null $_ldapProvider
+ * @property Adldap|null $_secondLdapProvider
  * @property array $ldapConfig
  * @property array $secondLdapConfig
  * @property bool $createLocalUsers
@@ -40,8 +40,10 @@ use yii\helpers\VarDumper;
  * @property int $defaultUserId
  * @property string $userIdentificationLdapAttribute
  * @property bool|array $otherOrganizationalUnits
- *
  * @property array $mapUserARtoLDAPattr
+ *
+ * @property-read Adldap|null $ldapProvider
+ * @property-read Adldap|null $secondLdapProvider
  */
 class UsuarioLdapComponent extends Component
 {
@@ -50,14 +52,14 @@ class UsuarioLdapComponent extends Component
      *
      * @var Adldap|null
      */
-    public $ldapProvider;
+    private $_ldapProvider;
 
     /**
      * Stores the second LDAP provider
      *
      * @var Adldap|null
      */
-    public $secondLdapProvider;
+    private $_secondLdapProvider;
 
     /**
      * Parameters for connecting to LDAP server as documented in https://adldap2.github.io/Adldap2/#/setup?id=options
@@ -171,9 +173,23 @@ class UsuarioLdapComponent extends Component
 
         $this->events();
 
-        $this->initAdLdap();
-
         parent::init();
+    }
+
+    public function getLdapProvider()
+    {
+        if (empty($this->_ldapProvider)) {
+           $this->initAdLdap();
+        }
+        return $this->_ldapProvider;
+    }
+
+    public function getSecondLdapProvider()
+    {
+        if (empty($this->_secondLdapProvider)) {
+           $this->initAdLdap();
+        }
+        return $this->_secondLdapProvider;
     }
 
     /**
@@ -207,7 +223,7 @@ class UsuarioLdapComponent extends Component
                     $config = $this->ldapConfig;
                 }
             }
-            $this->ldapProvider = $ad;
+            $this->_ldapProvider = $ad;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to LDAP Server", $e->getMessage());
             throw new LdapConfigurationErrorException($e->getMessage());
@@ -217,7 +233,7 @@ class UsuarioLdapComponent extends Component
         $ad2->addProvider($this->secondLdapConfig);
         try {
             $ad2->connect();
-            $this->secondLdapProvider = $ad2;
+            $this->_secondLdapProvider = $ad2;
         } catch (adLDAPException $e) {
             $this->error("Error connecting to the second LDAP Server", $e);
             throw new LdapConfigurationErrorException($e->getMessage());
@@ -423,6 +439,7 @@ class UsuarioLdapComponent extends Component
 
         // Write user to LDAP after confirmation (high-priority event/do not append)
         Event::on(RegistrationController::class, UserEvent::EVENT_AFTER_CONFIRMATION, function (UserEvent $event) {
+            Yii::info(UserEvent::EVENT_AFTER_CONFIRMATION, 'Elias');
             $user = $event->getUser();
             $this->createLdapUser($user);
         }, null, false);
@@ -625,9 +642,6 @@ class UsuarioLdapComponent extends Component
     private function createLdapUser($user)
     {
 
-        if ($this->userByUsername($user->username) !== null) {
-            return;
-        }
         /* @var $ldapUser \Adldap\Models\User */
         $ldapUser = $this->secondLdapProvider->make()->user([
             'cn' => $user->username,
