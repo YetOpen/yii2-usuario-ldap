@@ -50,7 +50,7 @@ class UsuarioLdapComponent extends Component
      *
      * @var Adldap|null
      */
-    private $ldapProvider;
+    public $ldapProvider;
 
     /**
      * Stores the second LDAP provider
