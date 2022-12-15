@@ -62,7 +62,9 @@ class Module extends Component
     public $ldapConfig;
 
     /**
-     * Parameters for connecting to the second LDAP server
+     * Parameters for connecting to the second LDAP server, this will be the LDAP server where users are synced if $syncUsersToLdap is TRUE
+     * Default NULL and it will assume same config as $ldapConfig
+     * If FALSE second LDAP connection will not be established
      * @var array
      */
     public $secondLdapConfig;
@@ -194,14 +196,16 @@ class Module extends Component
             throw new LdapConfigurationErrorException($e->getMessage());
         }
         // Connect second LDAP
-        $ad2 = new Adldap();
-        $ad2->addProvider($this->secondLdapConfig);
-        try {
-            $ad2->connect();
-            $this->secondLdapProvider = $ad2;
-        } catch (adLDAPException $e) {
-            $this->error("Error connecting to the second LDAP Server", $e);
-            throw new LdapConfigurationErrorException($e->getMessage());
+        if ($this->secondLdapConfig !== FALSE) {
+            $ad2 = new Adldap();
+            $ad2->addProvider($this->secondLdapConfig);
+            try {
+                $ad2->connect();
+                $this->secondLdapProvider = $ad2;
+            } catch (adLDAPException $e) {
+                $this->error("Error connecting to the second LDAP Server", $e);
+                throw new LdapConfigurationErrorException($e->getMessage());
+            }
         }
         parent::init();
     }
@@ -265,7 +269,7 @@ class Module extends Component
                     $this->info("The user will be created");
                     $user = new User();
                     $user->username = $username;
-                    $user->password = uniqid();
+                    $user->password = uniqid("", true);
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
                     $user->confirmed_at = time();
@@ -333,7 +337,7 @@ class Module extends Component
             $this->initAdLdap();
             /**
              * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
-             * If the the uurlser is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
+             * If the user is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
              * to the url specified in `passwordRecoveryRedirect`
              */
             $form = $event->getForm();
