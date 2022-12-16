@@ -7,6 +7,7 @@ use Adldap\AdldapException;
 use Adldap\Connections\Provider;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
+use app\models\LoginForm;
 use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
@@ -14,6 +15,7 @@ use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
+use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
 use yetopen\helpers\ArrayHelper;
 use Yii;
@@ -21,6 +23,7 @@ use yii\base\Component;
 use yii\base\Event;
 use Da\User\Controller\SecurityController;
 use Da\User\Event\FormEvent;
+use yii\base\ModelEvent;
 use yii\db\ActiveRecord;
 use yii\helpers\VarDumper;
 
@@ -43,6 +46,8 @@ use yii\helpers\VarDumper;
  */
 class Module extends Component
 {
+    use ContainerAwareTrait;
+
     /**
      * Stores the LDAP provider
      * @var Adldap
@@ -144,6 +149,12 @@ class Module extends Component
     ];
 
     /**
+     * Used for cashing the user once is found
+     * @var $ldapUser AdldapUser
+     */
+    private $ldapUser;
+
+    /**
      * {@inheritdoc}
      */
     public function init()
@@ -211,11 +222,19 @@ class Module extends Component
     }
 
     public function events() {
-        Event::on(SecurityController::class, FormEvent::EVENT_BEFORE_LOGIN, function (FormEvent $event) {
+        Event::on(LoginForm::class, LoginForm::EVENT_AFTER_VALIDATE, function (Event $event) {
             $this->initAdLdap();
+
+            /* @var $form \Da\User\Form\LoginForm */
+            $form = $event->sender;
+
+            if (!$form->hasErrors()) {
+                // Local login already succeeded, no need to try LDAP
+                return;
+            }
+
             /* @var $provider Provider */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
-            $form = $event->getForm();
 
             $username = $form->login;
             $password = $form->password;
@@ -245,19 +264,11 @@ class Module extends Component
                 }
             }
 
-            $username_inserted = $username;
-            $ldap_user = NULL;
-            foreach (['uid', 'cn', 'samaccountname'] as $ldapAttr) {
-                try {
-                    $ldap_user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
-                } catch (NoLdapUserException $e) {
-                    continue;
-                }
-            }
+            // LDAP authentication successfully, from now on we have to manage what to do with the user based on the module configuration
 
-            if(is_null($ldap_user)) {
-                throw new NoLdapUserException("Impossible to find LDAP user");
-            }
+            $username_inserted = $username;
+            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname'], 'ldapProvider');
+
             $username = ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
             if (empty($username)) {
                 $username = $username_inserted;
@@ -325,13 +336,13 @@ class Module extends Component
                 }
             }
 
-            // Now I have a valid user which passed LDAP authentication, lets login it
-            $userIdentity = User::findIdentity($user->id);
-            $duration = $form->rememberMe ? $form->module->rememberLoginLifespan : 0;
-            Yii::$app->getUser()->login($userIdentity, $duration);
-            Yii::$app->session->set($this->sessionKeyForUsername, $user->username);
+            // Now I have a valid user which passed LDAP authentication, we remove any error that may stop the login based on previous local authentication
+            $form->clearErrors('password');
+            $clIdentityUser = $this->make(User::class);
+            $userIdentity = $clIdentityUser::findIdentity($user->id);
+            $form->setUser($userIdentity);
             Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
-            return Yii::$app->controller->goBack()->send();
+            return;
         });
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
             $this->initAdLdap();
@@ -405,6 +416,7 @@ class Module extends Component
             $token = $event->getToken();
             $user = $token->user;
             try {
+                /* @var $ldapUser AdldapUser */
                 $ldapUser = $this->findLdapUser($user->username, 'cn');
             } catch (NoLdapUserException $e) {
                 // Unable to find the user in ldap, if I have the password in cleare I create it
@@ -465,20 +477,12 @@ class Module extends Component
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
-        $user = NULL;
-        foreach (['uid', 'cn', 'samaccountname'] as $ldapAttr) {
-            try {
-                $user = $this->findLdapUser($username, $ldapAttr, 'ldapProvider');
-            } catch (NoLdapUserException $e) {
-                continue;
-            }
-            break;
-        }
-        if(is_null($user)) {
+        try {
+            $user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname'], 'ldapProvider');
+        } catch (NoLdapUserException $e) {
             $this->warning("Couldn't find the user using another attribute");
             return FALSE;
         }
-        $this->info("Found user with attribute `$ldapAttr`");
 
         // Gets the user authentication attribute from the distinguished name
         $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
@@ -504,16 +508,28 @@ class Module extends Component
 
     /**
      * @param $username
-     * @param string $key
+     * @param string|string[] $keys
      * @param string $ldapProvider
      * @return mixed
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    private function findLdapUser ($username, $key, $ldapProvider = 'secondLdapProvider') {
-        $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
-            ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
-            ->first();
+    private function findLdapUser ($username, $keys, $ldapProvider = 'secondLdapProvider') {
+
+        if (!empty($this->ldapUser)) {
+            return $this->ldapUser;
+        }
+
+        if (!is_array($keys)) $keys = [$keys];
+        foreach ($keys AS $key) {
+            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+                ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
+                ->first();
+            if (!empty($ldapUser)) {
+                $this->info("Found user with attribute `$key`");
+                break;
+            }
+        }
 
         if (empty($ldapUser)) {
             throw new NoLdapUserException();
@@ -526,7 +542,9 @@ class Module extends Component
         if(get_class($ldapUser) !== AdldapUser::class) {
             throw new NoLdapUserException("The search for the user returned an instance of the class ".get_class($ldapUser));
         }
-        return $ldapUser;
+        $this->ldapUser = $ldapUser;
+        return $this->ldapUser;
+
     }
 
     /**
