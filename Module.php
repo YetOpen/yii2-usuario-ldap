@@ -267,7 +267,7 @@ class Module extends Component
             // LDAP authentication successfully, from now on we have to manage what to do with the user based on the module configuration
 
             $username_inserted = $username;
-            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname'], 'ldapProvider');
+            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'mail', 'userPrincipalName'], 'ldapProvider');
 
             $username = ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
             if (empty($username)) {
@@ -283,6 +283,9 @@ class Module extends Component
                     $user->password = uniqid("", true);
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
+                    if (empty($user->email)) {
+                        $user->email = NULL;
+                    }
                     $user->confirmed_at = time();
                     if (!$user->save()) {
                         $this->error("Error saving the new user in the database", $user->errors);
@@ -478,7 +481,7 @@ class Module extends Component
         // Finds the user first using the username as uid then, if nothing was found, as cn
         // FIXME should it be done for the mail key too?
         try {
-            $user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname'], 'ldapProvider');
+            $user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'email', 'userPrincipalName'], 'ldapProvider');
         } catch (NoLdapUserException $e) {
             $this->warning("Couldn't find the user using another attribute");
             return FALSE;
@@ -529,6 +532,10 @@ class Module extends Component
                 $this->info("Found user with attribute `$key`");
                 break;
             }
+        }
+
+        if (empty($ldapUser)) {
+            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()->find($username);
         }
 
         if (empty($ldapUser)) {
