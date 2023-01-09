@@ -1,6 +1,17 @@
 Yii2 Usuario LDAP Changelog
 ===========================
 
+1.3.2 Dec 20, 2022
+-------------------------
+
+- Update Adldap2 library and add new fields in ldap user search
+- Perform LDAP auth in event LoginForm::EVENT_BEFORE_LOGIN
+
+1.3.1 Dec 15, 2022
+-------------------------
+
+- Possibility to have no second LDAP config, more entropy for LDAP user password creation
+
 1.3.0 Jul 05, 2022
 -------------------------
 
