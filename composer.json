@@ -13,6 +13,10 @@
         {
             "name": "Liviu Calin",
             "email": "liviu.calin@yetopen.it"
+        },
+        {
+            "name": "Elias Luhr",
+            "email": "e.luhr@herzogkommunikation.de"
         }
     ],
     "require": {

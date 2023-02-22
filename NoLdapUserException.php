@@ -9,5 +9,5 @@ use Exception;
  */
 class NoLdapUserException extends Exception
 {
-
+    public $message = "LDAP user not found";
 }
