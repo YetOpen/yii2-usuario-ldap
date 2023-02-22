@@ -5,16 +5,22 @@ namespace yetopen\usuarioLdap;
 use Adldap\Adldap;
 use Adldap\AdldapException;
 use Adldap\Connections\Provider;
+use Adldap\Models\Attributes\AccountControl;
+use Adldap\Models\Concerns\HasUserAccountControl;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
-use app\models\LoginForm;
 use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
+use Da\User\Form\LoginForm;
+use Da\User\Form\SettingsForm;
+use Da\User\Model\Assignment;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
+use Da\User\Query\UserQuery;
+use Da\User\Traits\AuthManagerAwareTrait;
 use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
 use yetopen\helpers\ArrayHelper;
@@ -26,6 +32,7 @@ use Da\User\Event\FormEvent;
 use yii\base\ModelEvent;
 use yii\db\ActiveRecord;
 use yii\helpers\VarDumper;
+use yii\web\Application as WebApplication;
 
 /**
  * Class Module
@@ -47,6 +54,7 @@ use yii\helpers\VarDumper;
 class Module extends Component
 {
     use ContainerAwareTrait;
+    use AuthManagerAwareTrait;
 
     /**
      * Stores the LDAP provider
@@ -86,6 +94,15 @@ class Module extends Component
      * @var bool|array
      */
     public $defaultRoles = FALSE;
+
+    /**
+     * If set different from `false`, it will be forced on the newly created users as their "account control".
+     * By default, it is set to `false`.
+     * The attribute is present in `ActiveDirectory` style schemas only, the standard for activating the account is `512`.
+     * @see HasUserAccountControl
+     * @var false|int|string|AccountControl
+     */
+    public $defaultUserAccountControl = FALSE;
 
     /**
      * If TRUE changes to local users are synchronized with the second LDAP server specified.
@@ -142,10 +159,27 @@ class Module extends Component
      */
     public $logCategory = 'YII2_USUARIO_LDAP';
 
+    /**
+     * If set, when new LDAP users are created or assigned to a role, they will be added to groups based on this mapping.
+     * It must be an array where the key corresponds to a Yii2 RBAC role and as value either the DN or an array of DNs
+     * of groups to which user assigned to that role have to be added.
+     * For example:
+     * ```php
+     * // Yii2 users with assigned the role "admin" will be automatically added to the "administrator" LDAP group
+     * 'rolesGroupsMapping' => [
+     *      'admin' => ['administrators']
+     * ]
+     * ```
+     * @warning Users must be directly assigned to the roles to be added to the LDAP group.
+     * @var array
+     */
+    public $rolesGroupsMap = [];
+
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
         'uid' => 'username',
         'mail' => 'email',
+        'samaccountname' => 'username',
     ];
 
     /**
@@ -159,6 +193,8 @@ class Module extends Component
      */
     public function init()
     {
+        $this->initI18n();
+
         // TODO check all the module params
         $this->checkLdapConfiguration();
 
@@ -168,6 +204,24 @@ class Module extends Component
         $this->events();
 
         parent::init();
+    }
+
+    protected function initI18n()
+    {
+        Yii::setAlias("@usuarioLdap", __DIR__);
+        $config = [
+            'class' => 'yii\i18n\PhpMessageSource',
+            'basePath' => "@usuarioLdap/messages",
+            'forceTranslation' => true,
+        ];
+        $globalConfig = \yii\helpers\ArrayHelper::getValue(Yii::$app->i18n->translations, "usuarioLdap*", []);
+        if (!empty($globalConfig)) {
+            $config = array_merge($config, is_array($globalConfig) ? $globalConfig : (array)$globalConfig);
+        }
+        if (!empty($this->i18n) && is_array($this->i18n)) {
+            $config = array_merge($config, $this->i18n);
+        }
+        Yii::$app->i18n->translations["usuarioLdap*"] = $config;
     }
 
     /**
@@ -203,6 +257,9 @@ class Module extends Component
             }
             $this->ldapProvider = $ad;
         } catch (adLDAPException $e) {
+            if(YII_DEBUG) {
+                throw $e;
+            }
             $this->error("Error connecting to LDAP Server", $e->getMessage());
             throw new LdapConfigurationErrorException($e->getMessage());
         }
@@ -344,8 +401,8 @@ class Module extends Component
             $clIdentityUser = $this->make(User::class);
             $userIdentity = $clIdentityUser::findIdentity($user->id);
             $form->setUser($userIdentity);
-            Yii::info("Utente '{$user->username}' accesso LDAP eseguito con successo", "ACCESSO_LDAP");
-            return;
+
+            Yii::info("The user '{$user->username}' has successfully logged in via LDAP", "ACCESSO_LDAP");
         });
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
             $this->initAdLdap();
@@ -367,6 +424,43 @@ class Module extends Component
                 Yii::$app->end();
             }
         });
+        Event::on(SettingsForm::class, SettingsForm::EVENT_AFTER_VALIDATE, function (Event $event) {
+            $this->initAdLdap();
+
+            /* @var $form \Da\User\Form\SettingsForm */
+            $form = $event->sender;
+
+            if (!$form->hasErrors() && empty($form->current_password)) {
+                // Local login already succeeded, no need to try LDAP
+                return;
+            }
+
+            /* @var $provider Provider */
+            $provider = Yii::$app->usuarioLdap->ldapProvider;
+
+            // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
+            if (!$this->tryAuthentication($provider, $form->getUser()->username, $form->current_password)) {
+                $failed = TRUE;
+                if($this->otherOrganizationalUnits) {
+                    foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
+                        $prov = $provider->getProvider($otherOrganizationalUnit);
+                        if($this->tryAuthentication($prov, $form->getUser()->username, $form->current_password)) {
+                            $failed = FALSE;
+                            break;
+                        }
+                    }
+                }
+                if($failed) {
+                    $this->warning("Authentication failed");
+                    // Failed.
+                    return;
+                }
+            }
+
+            // Now I have a valid user which passed LDAP authentication, we remove any error on the current password
+            // based on previous local authentication so that they can still save
+            $form->clearErrors('current_password');
+        });
         if ($this->syncUsersToLdap !== TRUE) {
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
@@ -377,16 +471,33 @@ class Module extends Component
              * After a successful login if no LDAP user is found I create it.
              * Is the only point where I can have the user password in clear for existing users
              * and sync them to LDAP
+             * @var LoginForm $form
              */
             $form = $event->getForm();
 
-            $username = $form->login;
+            $user = $form->getUser();
             try {
-                $ldapUser = $this->findLdapUser($username, 'cn');
+                $ldapUser = $this->findLdapUser($user->username, 'cn');
+                $ldapEmail = $ldapUser->getEmail();
+                // If the email address of the user in the application doesn't correspond with the one on the LDAP server
+                // we override the local one and display a
+                if(!empty($ldapEmail) && $ldapEmail !== $user->email) {
+                    $oldEmail = $user->email;
+                    $user->email = $ldapEmail;
+                    if (!$user->save()) {
+                        $this->error("Could not sync local email with remote one", $user->errors);
+                    } else if(is_a(Yii::$app, WebApplication::class)) {
+                        Yii::$app->session->addFlash('warning', Yii::t('usuarioLdap',
+                            'Your local user email ({oldEmail}) has been automatically updated with the one on the remote server ({newEmail})',
+                            [
+                                'oldEmail' => $oldEmail,
+                                'newEmail' => $user->email,
+                            ]
+                        ));
+                    }
+                }
             } catch (NoLdapUserException $e) {
-                $password = $form->password;
-                $user = User::findOne(['username' => $username]);
-                $user->password = $password;
+                $user->password = $form->password;
                 $this->createLdapUser($user);
             }
         });
@@ -394,8 +505,14 @@ class Module extends Component
             $this->initAdLdap();
             $user = $event->getUser();
             try {
-                $this->createLdapUser($user);
-            } catch (\yii\base\ErrorException $e) {
+                // We'll create the user on LDAP only if it doesn't already exist on LDAP
+                // TODO: it'd be better if findLdapUser would return null
+                try {
+                    $this->findLdapUser($user->username, 'cn');
+                } catch (NoLdapUserException $exception) {
+                    $this->createLdapUser($user);
+                }
+            } catch (LdapUserException $e) {
                 // Probably the user already exists on LDAP
                 // TODO:
                 // I can arrive here if:
@@ -404,7 +521,7 @@ class Module extends Component
                 // None of the presented cases at the moment is part of our specifications
             }
         });
-        Event::on(AdminController::class, ActiveRecord::EVENT_BEFORE_UPDATE, function (UserEvent $event) {
+        Event::on(AdminController::class, UserEvent::EVENT_AFTER_ACCOUNT_UPDATE, function (UserEvent $event) {
             $this->initAdLdap();
             $user = $event->getUser();
             $this->updateLdapUser($user);
@@ -429,10 +546,8 @@ class Module extends Component
                 }
                 return;
             }
-            if (!empty($user->password)) {
-                // If clear password is specified I update it also in LDAP
-                $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
-            }
+            // If clear password is specified I update it also in LDAP
+            $ldapUser->setPassword($user->password);
 
             if (!$ldapUser->save()) {
                 throw new ErrorException("Impossible to modify the LDAP user");
@@ -452,6 +567,55 @@ class Module extends Component
                 throw new ErrorException("Impossible to delete the LDAP user");
             }
         });
+        // We have to use the AFTER_VALIDATE because AuthManager doesn't launch any event when assigning or revoking
+        // a role to/from a user
+        Event::on(Assignment::class, Assignment::EVENT_AFTER_VALIDATE, function (Event $event) {
+            /** @var Assignment $model */
+            $model = $event->sender;
+            // Model validate has failed
+            if($model->hasErrors()) {
+                return;
+            }
+
+            $this->initAdLdap();
+
+            if (!is_array($model->items)) {
+                $model->items = [];
+            }
+
+            /** @var User $user */
+            $user = $this->make(UserQuery::class)->where(['id' => $model->user_id])->one();
+
+            try {
+                $ldapUser = $this->findLdapUser(
+                    $user->username,
+                    ['uid', 'cn', 'samaccountname', 'email', 'userPrincipalName']
+                );
+            } catch (NoLdapUserException $e) {
+                // Not an LDAP user
+                return;
+            }
+            $assignedItems = $this->getAuthManager()->getItemsByUser($model->user_id);
+            $assignedItemsNames = array_keys($assignedItems);
+
+            foreach (array_diff($assignedItemsNames, $model->items) as $item) {
+                // Getting the groups for the given item
+                $groups = ArrayHelper::getValue($this->rolesGroupsMap, $item, []);
+                // Casting the groups to array since they could be a single group set as a string
+                foreach ((array)$groups as $group) {
+                    $ldapUser->removeGroup($group);
+                }
+            }
+
+            foreach (array_diff($model->items, $assignedItemsNames) as $item) {
+                // Getting the groups for the given item
+                $groups = ArrayHelper::getValue($this->rolesGroupsMap, $item, []);
+                // Casting the groups to array since they could be a single group set as a string
+                foreach ((array)$groups as $group) {
+                    $ldapUser->addGroup($group);
+                }
+            }
+        });
     }
 
     /**
@@ -466,6 +630,7 @@ class Module extends Component
      */
     private function tryAuthentication($provider, $username, $password) {
         $this->info("Trying authentication for {$username} with provider", $provider->getSchema());
+
         // Tries to authenticate the user with the standard configuration
         if($provider->auth()->attempt($username, $password)) {
             $this->info("User successfully authenticated");
@@ -513,7 +678,7 @@ class Module extends Component
      * @param $username
      * @param string|string[] $keys
      * @param string $ldapProvider
-     * @return mixed
+     * @return AdldapUser
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
@@ -555,29 +720,42 @@ class Module extends Component
     }
 
     /**
-     * @param $user
+     * @param User $user
      * @throws ErrorException
      */
     private function createLdapUser ($user) {
+        /** @var AdldapUser $ldapUser */
         $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
             'cn' => $user->username,
         ]);
 
         // Set LDAP user attributes from local user if changed
-        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
-            $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
-        }
+        $ldapUser->fill(ArrayHelper::toArray($user, [
+            get_class($user) => static::$mapUserARtoLDAPattr,
+        ]));
 
-        $ldapUser->setAttribute('userPassword', '{SHA}'. base64_encode(pack('H*', sha1($user->password))));
+        $ldapUser->setPassword($user->password);
 
-        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
-            if ($user->isAttributeChanged($userAttr)) {
-                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
-            }
+        // If requested we'll set the user account control
+        if(method_exists($ldapUser, 'setUserAccountControl') && $this->defaultUserAccountControl !== false) {
+            $ldapUser->setUserAccountControl($this->defaultUserAccountControl);
         }
 
         if (!$ldapUser->save()) {
-            throw new ErrorException("Impossible to create the LDAP user");
+            throw new LdapUserException("Impossible to create the LDAP user");
+        }
+
+        // If set on the module configuration, adding the newly created user to the groups corresponding to Yii2 roles.
+        foreach ($this->rolesGroupsMap as $role => $groups) {
+            // User must be directly assigned to the role to be added to the group
+            if($user->hasRole($role)) {
+                // Groups can be either a string or an array, casting it to array
+                foreach ((array)$groups as $group) {
+                    if(!$ldapUser->addGroup($group)) {
+                        $this->error("Could not add user {$user->username} to LDAP group {$group}");
+                    }
+                }
+            }
         }
     }
 
@@ -602,15 +780,15 @@ class Module extends Component
             return;
         }
 
-        // Set LDAP user attributes from local user if changed
-        foreach (self::$mapUserARtoLDAPattr as $ldapAttr => $userAttr) {
-            if ($user->isAttributeChanged($userAttr)) {
-                $ldapUser->setAttribute($ldapAttr, $user->$userAttr);
-            }
-        }
+        // Set LDAP user attributes from local user. In case the attribute has not been changed it is handled directly
+        // by AdLdap plugin, this way any misalignment can be handled by simply saving the user.
+        $ldapUser->fill(ArrayHelper::toArray($user, [
+            get_class($user) => static::$mapUserARtoLDAPattr,
+        ]));
+
+        // If the clear password is set, it means it has been changed we need to update it in LDAP also
         if (!empty($user->password)) {
-            // If clear password is specified I update it also in LDAP
-            $ldapUser->setAttribute('userPassword', '{SHA}' . base64_encode(pack('H*', sha1($user->password))));
+            $ldapUser->setPassword($user->password);
         }
 
         if (!$ldapUser->save()) {
@@ -618,8 +796,11 @@ class Module extends Component
         }
 
         if ($username != $user->username) {
+            /** @var Provider $provider */
+            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
+            $dn = $provider->getSchema()->commonName();
             // If username is changed the procedure to change the cn in LDAP is the following
-            if (!$ldapUser->rename("cn={$user->username}")) {
+            if (!$ldapUser->rename("$dn={$user->username}")) {
                 throw new ErrorException("Impossible to rename the LDAP user");
             }
         }
