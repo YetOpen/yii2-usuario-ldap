@@ -361,7 +361,7 @@ class UsuarioLdapComponent extends Component
             $username_inserted = $username;
             $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'mail', 'userPrincipalName'], 'ldapProvider');
 
-            $username = ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
+            $username = \yii\helpers\ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
             if (empty($username)) {
                 $username = $username_inserted;
             }
@@ -435,8 +435,10 @@ class UsuarioLdapComponent extends Component
             // Now I have a valid user which passed LDAP authentication, we remove any error that may stop the login based on previous local authentication
             $form->clearErrors('password');
             $clIdentityUser = $this->make(User::class);
-            $userIdentity = $clIdentityUser::findIdentity($user->id);
-            $form->setUser($userIdentity);
+
+            #TODO: form has no setUser(?), lines can be removed --- login still works
+            #$userIdentity = $clIdentityUser::findIdentity($user->id);
+            #$form->setUser($userIdentity);
 
             Yii::info("The user '{$user->username}' has successfully logged in via LDAP", "ACCESSO_LDAP");
         });
