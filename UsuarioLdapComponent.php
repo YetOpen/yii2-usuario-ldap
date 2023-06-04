@@ -27,7 +27,7 @@ use Da\User\Query\UserQuery;
 use Da\User\Traits\AuthManagerAwareTrait;
 use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
-use yetopen\helpers\ArrayHelper;
+use yii\helpers\ArrayHelper;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
@@ -234,7 +234,7 @@ class UsuarioLdapComponent extends Component
             'basePath' => "@usuarioLdap/messages",
             'forceTranslation' => true,
         ];
-        $globalConfig = \yii\helpers\ArrayHelper::getValue(Yii::$app->i18n->translations, "usuarioLdap*", []);
+        $globalConfig = ArrayHelper::getValue(Yii::$app->i18n->translations, "usuarioLdap*", []);
         if (!empty($globalConfig)) {
             $config = array_merge($config, is_array($globalConfig) ? $globalConfig : (array)$globalConfig);
         }
@@ -361,7 +361,7 @@ class UsuarioLdapComponent extends Component
             $username_inserted = $username;
             $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'mail', 'userPrincipalName'], 'ldapProvider');
 
-            $username = ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
+            $username = \yii\helpers\ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
             if (empty($username)) {
                 $username = $username_inserted;
             }
@@ -435,6 +435,7 @@ class UsuarioLdapComponent extends Component
             // Now I have a valid user which passed LDAP authentication, we remove any error that may stop the login based on previous local authentication
             $form->clearErrors('password');
             $clIdentityUser = $this->make(User::class);
+
             $userIdentity = $clIdentityUser::findIdentity($user->id);
             $form->setUser($userIdentity);
 

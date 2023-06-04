@@ -21,7 +21,7 @@
     ],
     "require": {
         "yiisoft/yii2": "~2.0.0",
-        "2amigos/yii2-usuario": "~1.0",
+        "2amigos/yii2-usuario": "^1.6.0",
         "adldap2/adldap2": "^10.4.3",
         "kartik-v/yii2-krajee-base": "*"
     },
