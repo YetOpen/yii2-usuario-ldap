@@ -11,5 +11,5 @@ use Exception;
  */
 class LdapConfigurationErrorException extends Exception
 {
-
+    public $message = "LDAP configuration error";
 }
