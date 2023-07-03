@@ -387,7 +387,8 @@ class UsuarioLdapComponent extends Component
                     }
 
                     // Gets the profile name of the user from the CN of the LDAP user
-                    $profile = Profile::findOne(['user_id' => $user->id]);
+                    $profileClass = $this->getClassMap()->get(Profile::class);
+                    $profile = $profileClass::findOne(['user_id' => $user->id]);
                     $profile->name = $ldap_user->getAttribute('cn')[0];
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {

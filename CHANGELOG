@@ -1,5 +1,8 @@
 Yii2 Usuario LDAP Changelog
 ===========================
+1.3.4 Jul 03, 2023
+- Respect usuario classMap configuration when using usuario Profile class
+
 
 1.3.3 Gen 09, 2023
 -------------------------
