@@ -195,9 +195,12 @@ class UsuarioLdapComponent extends Component
 
     private static $mapUserARtoLDAPattr = [
         'sn' => 'username',
+        'cn' => 'username',
         'uid' => 'username',
-        'mail' => 'email',
+        'userPrincipalName' => 'username',
         'samaccountname' => 'username',
+        'email' => 'email',
+        'mail' => 'email',
     ];
 
     /**
@@ -246,7 +249,7 @@ class UsuarioLdapComponent extends Component
     public function getLdapProvider()
     {
         if (empty($this->_ldapProvider)) {
-           $this->initAdLdap();
+            $this->initAdLdap();
         }
         return $this->_ldapProvider;
     }
@@ -254,7 +257,7 @@ class UsuarioLdapComponent extends Component
     public function getSecondLdapProvider()
     {
         if (empty($this->_secondLdapProvider)) {
-           $this->initAdLdap();
+            $this->initAdLdap();
         }
         return $this->_secondLdapProvider;
     }
@@ -359,13 +362,19 @@ class UsuarioLdapComponent extends Component
             // LDAP authentication successfully, from now on we have to manage what to do with the user based on the module configuration
 
             $username_inserted = $username;
-            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'mail', 'userPrincipalName'], 'ldapProvider');
+            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'userPrincipalName', 'email', 'mail'], 'ldapProvider');
 
-            $username = \yii\helpers\ArrayHelper::getValue($ldap_user->getAttribute('uid'), '0');
+            foreach (['uid', 'cn', 'userPrincipalName', 'samaccountname'] AS $key) {
+                $username = $ldap_user->getAttribute($key, '0');
+                if (!empty($username)) {
+                    break;
+                }
+            }
+
             if (empty($username)) {
                 $username = $username_inserted;
             }
-            $user = User::findOne(['username' => $username]);
+            $user = User::find()->andWhere(['or',['username' => $username], ['email' => $ldap_user->getEmail()]])->one();
             if (empty($user)) {
                 $this->info("User not found in the application database");
                 if ($this->createLocalUsers) {
@@ -389,7 +398,7 @@ class UsuarioLdapComponent extends Component
                     // Gets the profile name of the user from the CN of the LDAP user
                     $profileClass = $this->getClassMap()->get(Profile::class);
                     $profile = $profileClass::findOne(['user_id' => $user->id]);
-                    $profile->name = $ldap_user->getAttribute('cn')[0];
+                    $profile->name = $ldap_user->getAttribute('cn', 0);
                     // Tries to save only if the name has been found
                     if ($profile->name && !$profile->save()) {
                         $this->error("Error saving the new profile in the database", $profile->errors);
@@ -440,7 +449,7 @@ class UsuarioLdapComponent extends Component
             $userIdentity = $clIdentityUser::findIdentity($user->id);
             $form->setUser($userIdentity);
 
-            Yii::info("The user '{$user->username}' has successfully logged in via LDAP", "ACCESSO_LDAP");
+            $this->info("The user '{$user->username}' has successfully logged in via LDAP");
         });
 
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
@@ -568,7 +577,7 @@ class UsuarioLdapComponent extends Component
 
         // Write user to LDAP after confirmation (high-priority event/do not append)
         Event::on(RegistrationController::class, UserEvent::EVENT_AFTER_CONFIRMATION, function (UserEvent $event) {
-            Yii::info(UserEvent::EVENT_AFTER_CONFIRMATION, 'Elias');
+            $this->info(UserEvent::EVENT_AFTER_CONFIRMATION);
             $user = $event->getUser();
             $this->createLdapUser($user);
         }, null, false);
@@ -650,7 +659,7 @@ class UsuarioLdapComponent extends Component
             try {
                 $ldapUser = $this->findLdapUser(
                     $user->username,
-                    ['uid', 'cn', 'samaccountname', 'email', 'userPrincipalName']
+                    ['uid', 'cn', 'samaccountname', 'userPrincipalName', 'email', 'mail']
                 );
             } catch (NoLdapUserException $e) {
                 // Not an LDAP user
@@ -707,7 +716,7 @@ class UsuarioLdapComponent extends Component
 
         // Finds the user first using the username as uid then, if nothing was found, as cn
         try {
-            $user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'email', 'userPrincipalName'], 'ldapProvider');
+            $user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'userPrincipalName', 'email', 'mail'], 'ldapProvider');
         } catch (NoLdapUserException $e) {
             $this->warning("Couldn't find the user using another attribute");
             return false;
@@ -717,6 +726,8 @@ class UsuarioLdapComponent extends Component
         $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
         // Since an account can be matched by several attributes I take the one used in the dn for doing the bind
         preg_match('/(?<prefix>.*)=.*' . $this->ldapConfig['account_suffix'] . '/i', $dn, $prefix);
+
+
 
         $config = $this->ldapConfig;
         $config['account_prefix'] = $prefix['prefix'] . "=";
@@ -733,7 +744,7 @@ class UsuarioLdapComponent extends Component
             $provider->setConfiguration($this->ldapConfig);
             $provider->connect();
         } catch (\Exception $e) {
-            Yii::error($e->getMessage(), __METHOD__);
+            $this->error($e->getMessage());
             $success = false;
         }
         return $success;
