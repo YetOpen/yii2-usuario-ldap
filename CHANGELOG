@@ -1,5 +1,9 @@
 Yii2 Usuario LDAP Changelog
 ===========================
+1.3.6 Oct 16, 2023
+
+- Update UsuarioLdapComponent.php to avoid error when login succed but I'm not able to find ldap user
+
 1.3.5 Aug 30, 2023
 
 - Logging always with internal methods
