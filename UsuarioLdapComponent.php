@@ -362,7 +362,12 @@ class UsuarioLdapComponent extends Component
             // LDAP authentication successfully, from now on we have to manage what to do with the user based on the module configuration
 
             $username_inserted = $username;
-            $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'userPrincipalName', 'email', 'mail'], 'ldapProvider');
+            try {
+                $ldap_user = $this->findLdapUser($username, ['uid', 'cn', 'samaccountname', 'userPrincipalName', 'email', 'mail'], 'ldapProvider');
+            } catch (NoLdapUserException|MultipleUsersFoundException $e) {
+                $this->error("Impossible to retrive LDAP user, even if authentication succeeded I must block login", $e);
+                return false;
+            }
 
             foreach (['uid', 'cn', 'userPrincipalName', 'samaccountname'] AS $key) {
                 $username = $ldap_user->getAttribute($key, '0');
@@ -765,7 +770,7 @@ class UsuarioLdapComponent extends Component
         }
 
         if (!is_array($keys)) $keys = [$keys];
-        foreach ($keys AS $key) {
+        foreach ($keys as $key) {
             $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
                 ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
                 ->first();
@@ -780,7 +785,7 @@ class UsuarioLdapComponent extends Component
         }
 
         if (empty($ldapUser)) {
-            throw new NoLdapUserException("LDAP user $username ($key) not found");
+            throw new NoLdapUserException("LDAP user $username not found");
         }
 
         if (is_array($ldapUser)) {
