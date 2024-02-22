@@ -708,20 +708,16 @@ class UsuarioLdapComponent extends Component
 
     private function tryAuthentication($provider, $username, $password)
     {
-        $this->info("Trying authentication for {$username} with provider", $provider->getSchema());
+        $this->info("Trying authentication for {$username} with provider", $provider->getConnection()->getName());
         // Tries to authenticate the user with the standard configuration
         if ($provider->auth()->attempt($username, $password)) {
             $this->info("User successfully authenticated");
             return true;
         }
-        // If the suffix was not specified it is impossibile to search for another attribute
-        if (empty($this->ldapConfig['account_suffix'])) {
-            return false;
-        }
 
         $this->info("Default authentication didn't work, it will be tried again with another attribute");
 
-        // Finds the user first using the username as uid then, if nothing was found, as cn
+        // Finds the user first searching the username in ldap field configured
         try {
             $user = $this->findLdapUser($username, self::$ldapAttrs, 'ldapProvider');
         } catch (NoLdapUserException $e) {
@@ -731,30 +727,42 @@ class UsuarioLdapComponent extends Component
 
         // Gets the user authentication attribute from the distinguished name
         $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
+        $this->info($dn);
+
+        try {
+            if ($provider->auth()->attempt($dn, $password)) {
+                $this->info("User successfully authenticated with \$dn");
+                return true;
+            }
+        } catch (\Exception $e) {
+            $this->error($e->getMessage());
+        }
+
         // Since an account can be matched by several attributes I take the one used in the dn for doing the bind
-        preg_match('/(?<prefix>.*)=.*' . $this->ldapConfig['account_suffix'] . '/i', $dn, $prefix);
-
-
+        $dnCommas = explode(",", $dn);
+        list($userAuthKey,$userAuth) = explode("=", array_shift($dnCommas));
 
         $config = $this->ldapConfig;
-        $config['account_prefix'] = $prefix['prefix'] . "=";
-        $userAuth = $user->getAttribute($prefix['prefix'], 0);
+        $config['account_prefix'] = $userAuthKey . "=";
+        $config['account_suffix'] = "," . implode(",", $dnCommas);
+        $config['base_dn'] = implode(",", $dnCommas);
+        $this->info($userAuth);
 
         try {
             // The provider configuration needs to be reset with the new account_prefix
             $provider->setConfiguration($config);
             $provider->connect();
-            $success = false;
+            // Not sure the case with $dn covers all the cases, for now we keep this here
             if ($provider->auth()->attempt($userAuth, $password)) {
-                $success = true;
+                $this->info("User successfully authenticated with \$userAuth");
+                return true;
             }
             $provider->setConfiguration($this->ldapConfig);
             $provider->connect();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
-            $success = false;
         }
-        return $success;
+        return false;
     }
 
     /**
@@ -768,6 +776,7 @@ class UsuarioLdapComponent extends Component
     private function findLdapUser ($username, $keys, $ldapProvider = 'secondLdapProvider') {
 
         if (!empty($this->ldapUser)) {
+            $this->info("User already found");
             return $this->ldapUser;
         }
 
@@ -784,6 +793,9 @@ class UsuarioLdapComponent extends Component
 
         if (empty($ldapUser)) {
             $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()->find($username);
+            if (!empty($ldapUser)) {
+                $this->info("Found user with generic find");
+            }
         }
 
         if (empty($ldapUser)) {
