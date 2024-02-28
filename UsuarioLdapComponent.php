@@ -365,7 +365,7 @@ class UsuarioLdapComponent extends Component
 
             $username_inserted = $username;
             try {
-                $ldap_user = $this->findLdapUser($username, self::$ldapAttrs , 'ldapProvider');
+                $ldap_user = $this->findLdapUser($username, self::$ldapAttrs , $provider);
             } catch (NoLdapUserException|MultipleUsersFoundException $e) {
                 $this->error("Impossible to retrive LDAP user, even if authentication succeeded I must block login", $e);
                 return false;
@@ -381,7 +381,10 @@ class UsuarioLdapComponent extends Component
             if (empty($username)) {
                 $username = $username_inserted;
             }
-            $user = User::find()->andWhere(['or',['username' => $username], ['email' => $ldap_user->getEmail()]])->one();
+            $user = User::find()->andWhere(['or',
+                ['username' => $username],
+                ['email' => $ldap_user->getEmail() ?:  uniqid('no_email_so_no_email_search_', true)]
+            ])->one();
             if (empty($user)) {
                 $this->info("User not found in the application database searching with $key $username or {$ldap_user->getEmail()}");
                 if ($this->createLocalUsers) {
@@ -469,7 +472,7 @@ class UsuarioLdapComponent extends Component
             $form = $event->getForm();
             $email = $form->email;
             try {
-                $ldapUser = $this->findLdapUser($email, 'mail', 'ldapProvider');
+                $ldapUser = $this->findLdapUser($email, 'mail', Yii::$app->usuarioLdap->ldapProvider);
             } catch (NoLdapUserException $e) {
                 $this->info("User $email not found");
                 return;
@@ -719,7 +722,7 @@ class UsuarioLdapComponent extends Component
 
         // Finds the user first searching the username in ldap field configured
         try {
-            $user = $this->findLdapUser($username, self::$ldapAttrs, 'ldapProvider');
+            $user = $this->findLdapUser($username, self::$ldapAttrs, $provider);
         } catch (NoLdapUserException $e) {
             $this->warning("Couldn't find the user using another attribute");
             return false;
@@ -773,8 +776,11 @@ class UsuarioLdapComponent extends Component
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    private function findLdapUser ($username, $keys, $ldapProvider = 'secondLdapProvider') {
+    private function findLdapUser ($username, $keys, $provider = null) {
 
+        if (is_null($provider)) {
+            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
+        }
         if (!empty($this->ldapUser)) {
             $this->info("User already found");
             return $this->ldapUser;
@@ -782,7 +788,7 @@ class UsuarioLdapComponent extends Component
 
         if (!is_array($keys)) $keys = [$keys];
         foreach ($keys as $key) {
-            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()
+            $ldapUser = $provider->search()
                 ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
                 ->first();
             if (!empty($ldapUser)) {
@@ -792,7 +798,7 @@ class UsuarioLdapComponent extends Component
         }
 
         if (empty($ldapUser)) {
-            $ldapUser = Yii::$app->usuarioLdap->{$ldapProvider}->search()->find($username);
+            $ldapUser = $provider->search()->find($username);
             if (!empty($ldapUser)) {
                 $this->info("Found user with generic find");
             }
