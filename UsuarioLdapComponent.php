@@ -781,8 +781,10 @@ class UsuarioLdapComponent extends Component
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    private function findLdapUser ($username, $keys, $provider = null) {
-
+    public function findLdapUser ($username, $keys = null, $provider = null) {
+        if ($keys === null) {
+            $keys = self::$ldapAttrs;
+        }
         if (is_null($provider)) {
             $provider = Yii::$app->usuarioLdap->secondLdapProvider;
         }
