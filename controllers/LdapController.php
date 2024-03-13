@@ -38,18 +38,15 @@ class LdapController extends YOController
         $output = [];
         foreach ($ldapUsers as $d) {
             if(!empty($d->mail)) {
-                $output[] = [
-                    'value' => $d->mail[0],
-                    'username' => $d->samaccountname[0]
-                ];
+                $mail = $d->mail[0];
             } else {
                 // If there is, I show the username found, else show the search string
                 $username = !empty($d->samaccountname) ? $d->samaccountname[0] : $q;
-                $output[] = [
-                    'value' => $username . ' - ' . Yii::t('usuarioLdap', 'user without mail'),
-                ];
+                $mail = $username . ' - ' . Yii::t('usuarioLdap', 'user without mail');
             }
-
+            $output[] = [
+                'value' => $mail
+            ];
         }
         return $output;
     }
