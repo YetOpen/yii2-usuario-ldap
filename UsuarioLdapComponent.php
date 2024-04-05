@@ -225,7 +225,7 @@ class UsuarioLdapComponent extends Component
         $this->checkLdapConfiguration();
 
         // For second LDAP parameters use first one as default if not set
-        if (is_null($this->secondLdapConfig) || !$this->secondLdapConfig) {
+        if (is_null($this->secondLdapConfig)) {
             $this->secondLdapConfig = $this->ldapConfig;
         }
 
@@ -307,8 +307,7 @@ class UsuarioLdapComponent extends Component
             throw new LdapConfigurationErrorException($e->getMessage());
         }
         // Connect second LDAP
-        if ($this->secondLdapConfig !== FALSE || is_null($this->_secondLdapProvider)) {
-            $this->init();
+        if ($this->secondLdapConfig !== FALSE) {
             $ad2 = new Adldap();
             $ad2->addProvider($this->secondLdapConfig);
             try {
