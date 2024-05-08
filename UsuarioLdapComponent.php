@@ -789,7 +789,7 @@ class UsuarioLdapComponent extends Component
         }
         if (in_array($username, $this->ldapUsersCache)) {
             $this->info("User already found");
-            return $this->ldapUser;
+            return $this->ldapUsersCache[$username];
         }
 
         if (!is_array($keys)) $keys = [$keys];
