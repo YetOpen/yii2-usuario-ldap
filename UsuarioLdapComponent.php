@@ -11,11 +11,11 @@ use Adldap\Models\Model;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Query\Collection;
 use Adldap\Schemas\OpenLDAP;
-use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
 use Da\User\Controller\SecurityController;
+use Da\User\Controller\SettingsController;
 use Da\User\Dictionary\UserSourceType;
 use Da\User\Event\FormEvent;
 use Da\User\Event\ResetPasswordEvent;
@@ -29,11 +29,11 @@ use Da\User\Query\UserQuery;
 use Da\User\Traits\AuthManagerAwareTrait;
 use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
-use yii\helpers\ArrayHelper;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
 use yii\db\ActiveRecord;
+use yii\helpers\ArrayHelper;
 use yii\helpers\VarDumper;
 use yii\web\Application as WebApplication;
 
@@ -211,7 +211,7 @@ class UsuarioLdapComponent extends Component
      * Used for cashing the user once is found
      * @var $ldapUser AdldapUser
      */
-    private $ldapUser;
+    private $ldapUsersCache = [];
     private $ldapUsers;
 
     /**
@@ -225,7 +225,7 @@ class UsuarioLdapComponent extends Component
         $this->checkLdapConfiguration();
 
         // For second LDAP parameters use first one as default if not set
-        if (is_null($this->secondLdapConfig)) {
+        if (!$this->secondLdapConfig) {
             $this->secondLdapConfig = $this->ldapConfig;
         }
 
@@ -787,7 +787,7 @@ class UsuarioLdapComponent extends Component
         if (is_null($provider)) {
             $provider = Yii::$app->usuarioLdap->secondLdapProvider;
         }
-        if (!empty($this->ldapUser)) {
+        if (in_array($username, $this->ldapUsersCache)) {
             $this->info("User already found");
             return $this->ldapUser;
         }
@@ -821,8 +821,8 @@ class UsuarioLdapComponent extends Component
         if (get_class($ldapUser) !== AdldapUser::class) {
             throw new NoLdapUserException("The search for the user returned an instance of the class " . get_class($ldapUser));
         }
-        $this->ldapUser = $ldapUser;
-        return $this->ldapUser;
+        $this->ldapUsersCache[] = $username;
+        return $ldapUser;
 
     }
 
