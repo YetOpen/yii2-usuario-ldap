@@ -775,7 +775,7 @@ class UsuarioLdapComponent extends Component
     /**
      * @param $username
      * @param string|string[] $keys
-     * @param string $ldapProvider
+     * @param string $provider
      * @return AdldapUser
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
@@ -787,7 +787,7 @@ class UsuarioLdapComponent extends Component
         if (is_null($provider)) {
             $provider = Yii::$app->usuarioLdap->secondLdapProvider;
         }
-        if (in_array($username, $this->ldapUsersCache)) {
+        if (key_exists($username, $this->ldapUsersCache)) {
             $this->info("User already found");
             return $this->ldapUsersCache[$username];
         }
@@ -821,7 +821,7 @@ class UsuarioLdapComponent extends Component
         if (get_class($ldapUser) !== AdldapUser::class) {
             throw new NoLdapUserException("The search for the user returned an instance of the class " . get_class($ldapUser));
         }
-        $this->ldapUsersCache[] = $username;
+        $this->ldapUsersCache[$username] = $ldapUser;
         return $ldapUser;
 
     }
