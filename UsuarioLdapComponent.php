@@ -10,16 +10,17 @@ use Adldap\Models\Concerns\HasUserAccountControl;
 use Adldap\Models\Model;
 use Adldap\Models\User as AdldapUser;
 use Adldap\Schemas\OpenLDAP;
-use Da\User\Controller\SettingsController;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
 use Da\User\Controller\SecurityController;
+use Da\User\Controller\SettingsController;
 use Da\User\Event\FormEvent;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
 use Da\User\Form\LoginForm;
 use Da\User\Form\SettingsForm;
+use Da\User\Helper\SecurityHelper;
 use Da\User\Model\Assignment;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
@@ -27,11 +28,11 @@ use Da\User\Query\UserQuery;
 use Da\User\Traits\AuthManagerAwareTrait;
 use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
-use yii\helpers\ArrayHelper;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
 use yii\db\ActiveRecord;
+use yii\helpers\ArrayHelper;
 use yii\helpers\VarDumper;
 use yii\web\Application as WebApplication;
 
@@ -391,11 +392,13 @@ class UsuarioLdapComponent extends Component
                     $this->info("The user will be created");
                     $user = Yii::createObject(User::class);
                     $user->username = $username;
-                    $user->password = uniqid("", true);
+                    /** @var SecurityHelper $security */
+                    $security = $this->make(SecurityHelper::class);
+                    $user->password = $security->generatePassword(16);
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
                     if (empty($user->email)) {
-                        $user->email = NULL;
+                        $user->email = uniqid() . "@" . uniqid() . ".com";
                     }
                     $user->confirmed_at = time();
                     $user->password_hash = 'x';
@@ -425,6 +428,7 @@ class UsuarioLdapComponent extends Component
 
                     // Triggers the EVENT_AFTER_CREATE event
                     $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
+                    $this->trigger(LdapUserEvent::EVENT_AFTER_LDAP_USER_CREATE, new LdapUserEvent($user, $this->ldapConfig));
                 } else {
                     $this->info("The user will be logged using the default user");
                     $user = User::findOne($this->defaultUserId);
