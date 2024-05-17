@@ -212,7 +212,6 @@ class UsuarioLdapComponent extends Component
      * @var $ldapUser AdldapUser
      */
     private $ldapUsersCache = [];
-    private $ldapUsers;
 
     /**
      * {@inheritdoc}
