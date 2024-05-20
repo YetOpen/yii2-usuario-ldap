@@ -9,12 +9,14 @@ use Adldap\Models\Attributes\AccountControl;
 use Adldap\Models\Concerns\HasUserAccountControl;
 use Adldap\Models\Model;
 use Adldap\Models\User as AdldapUser;
+use Adldap\Query\Collection;
 use Adldap\Schemas\OpenLDAP;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
 use Da\User\Controller\SecurityController;
 use Da\User\Controller\SettingsController;
+use Da\User\Dictionary\UserSourceType;
 use Da\User\Event\FormEvent;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
@@ -210,7 +212,7 @@ class UsuarioLdapComponent extends Component
      * Used for cashing the user once is found
      * @var $ldapUser AdldapUser
      */
-    private $ldapUser;
+    private $ldapUsersCache = [];
 
     /**
      * {@inheritdoc}
@@ -223,7 +225,7 @@ class UsuarioLdapComponent extends Component
         $this->checkLdapConfiguration();
 
         // For second LDAP parameters use first one as default if not set
-        if (is_null($this->secondLdapConfig)) {
+        if (!$this->secondLdapConfig) {
             $this->secondLdapConfig = $this->ldapConfig;
         }
 
@@ -397,6 +399,7 @@ class UsuarioLdapComponent extends Component
                     $user->password = $security->generatePassword(16);
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
+                    $user->source = UserSourceType::LDAP;
                     if (empty($user->email)) {
                         $user->email = uniqid() . "@" . uniqid() . ".com";
                     }
@@ -775,19 +778,21 @@ class UsuarioLdapComponent extends Component
     /**
      * @param $username
      * @param string|string[] $keys
-     * @param string $ldapProvider
+     * @param string $provider
      * @return AdldapUser
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    private function findLdapUser ($username, $keys, $provider = null) {
-
+    public function findLdapUser ($username, $keys = null, $provider = null) {
+        if ($keys === null) {
+            $keys = self::$ldapAttrs;
+        }
         if (is_null($provider)) {
             $provider = Yii::$app->usuarioLdap->secondLdapProvider;
         }
-        if (!empty($this->ldapUser)) {
+        if (key_exists($username, $this->ldapUsersCache)) {
             $this->info("User already found");
-            return $this->ldapUser;
+            return $this->ldapUsersCache[$username];
         }
 
         if (!is_array($keys)) $keys = [$keys];
@@ -819,9 +824,30 @@ class UsuarioLdapComponent extends Component
         if (get_class($ldapUser) !== AdldapUser::class) {
             throw new NoLdapUserException("The search for the user returned an instance of the class " . get_class($ldapUser));
         }
-        $this->ldapUser = $ldapUser;
-        return $this->ldapUser;
+        $this->ldapUsersCache[$username] = $ldapUser;
+        return $ldapUser;
 
+    }
+
+    /**
+     * @param $username
+     * @param null $provider
+     * @param int $limit
+     * @return Collection
+     */
+    public function findLdapUsers($username, $provider = null, $limit = 20)
+    {
+        /* @var $provider Provider */
+        if (is_null($provider)) {
+            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
+        }
+
+        $ldapUsers = $provider->search()->limit($limit)->find([$username]);
+        if (!empty($ldapUsers)) {
+            $this->info("Found users with attributes `$username`");
+        }
+
+        return $ldapUsers;
     }
 
     /**

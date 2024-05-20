@@ -1,5 +1,13 @@
 Yii2 Usuario LDAP Changelog
 ===========================
+
+1.3.11 Apr 05, 2024
+-------------------------
+
+- Added the possibility to search users for all attributes
+- Added Module.php
+- Added translation config file
+
 1.3.10 May 10, 2024
 
 - Introduced `LdapUserEvent` and `EVENT_AFTER_LDAP_USER_CREATE` event launched after user creation from LDAP.
