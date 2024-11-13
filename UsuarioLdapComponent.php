@@ -399,7 +399,12 @@ class UsuarioLdapComponent extends Component
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
                     if (empty($user->email)) {
-                        $user->email = uniqid() . "@" . Yii::$app->request->hostName;
+                        $hostName = Yii::$app->request->hostName;
+                        if (strpos($hostName, '.') === false) {
+                            // usefull in case we are in localhost for passing email validator when 'checkDNS' => true
+                            $hostName = $hostName.'.com';
+                        }
+                        $user->email = uniqid() . "@" . $hostName;
                     }
                     $user->confirmed_at = time();
                     $user->password_hash = 'x';
