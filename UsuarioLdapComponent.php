@@ -16,7 +16,6 @@ use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
 use Da\User\Controller\SecurityController;
 use Da\User\Controller\SettingsController;
-use Da\User\Dictionary\UserSourceType;
 use Da\User\Event\FormEvent;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
@@ -399,9 +398,8 @@ class UsuarioLdapComponent extends Component
                     $user->password = $security->generatePassword(16);
                     // Gets the email from the ldap user
                     $user->email = $ldap_user->getEmail();
-                    $user->source = UserSourceType::LDAP;
                     if (empty($user->email)) {
-                        $user->email = uniqid() . "@" . uniqid() . ".com";
+                        $user->email = uniqid() . "@" . Yii::$app->request->hostName;
                     }
                     $user->confirmed_at = time();
                     $user->password_hash = 'x';

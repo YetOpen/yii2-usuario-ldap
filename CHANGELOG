@@ -1,6 +1,11 @@
 Yii2 Usuario LDAP Changelog
 ===========================
 
+1.3.12 Nov 13, 2024
+-------------------------
+- Fix wrong dependency from undefined usuario dictionary
+- Fix fake email generation use real hostname
+
 1.3.11 Apr 05, 2024
 -------------------------
 
