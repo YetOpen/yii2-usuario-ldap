@@ -19,6 +19,7 @@ use Da\User\Controller\SettingsController;
 use Da\User\Event\FormEvent;
 use Da\User\Event\ResetPasswordEvent;
 use Da\User\Event\UserEvent;
+use Da\User\Factory\MailFactory;
 use Da\User\Form\LoginForm;
 use Da\User\Form\SettingsForm;
 use Da\User\Helper\SecurityHelper;
@@ -26,9 +27,11 @@ use Da\User\Model\Assignment;
 use Da\User\Model\Profile;
 use Da\User\Model\User;
 use Da\User\Query\UserQuery;
+use Da\User\Service\UserCreateService;
 use Da\User\Traits\AuthManagerAwareTrait;
 use Da\User\Traits\ContainerAwareTrait;
 use ErrorException;
+use yetopen\anagrafica\models\Anagrafica;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
@@ -391,13 +394,17 @@ class UsuarioLdapComponent extends Component
                 $this->info("User not found in the application database searching with $key $username or {$ldap_user->getEmail()}");
                 if ($this->createLocalUsers) {
                     $this->info("The user will be created");
-                    $user = Yii::createObject(User::class);
-                    $user->username = $username;
+
                     /** @var SecurityHelper $security */
                     $security = $this->make(SecurityHelper::class);
-                    $user->password = $security->generatePassword(16);
-                    // Gets the email from the ldap user
-                    $user->email = $ldap_user->getEmail();
+                    /** @var \app\models\User $user */
+                    $user = $this->make(User::class, [], [
+                        'scenario' => 'create',
+                        'username' => $username,
+                        'email' => $ldap_user->getEmail(),
+                        'password' => $security->generatePassword(16),
+                    ]);
+
                     if (empty($user->email)) {
                         $hostName = Yii::$app->request->hostName;
                         if (strpos($hostName, '.') === false) {
@@ -406,22 +413,22 @@ class UsuarioLdapComponent extends Component
                         }
                         $user->email = uniqid() . "@" . $hostName;
                     }
-                    $user->confirmed_at = time();
-                    $user->password_hash = 'x';
-                    if (!$user->save()) {
-                        $this->error("Error saving the new user in the database", $user->errors);
-                        // FIXME handle save error
-                        return;
-                    }
 
-                    // Gets the profile name of the user from the CN of the LDAP user
-                    $profileClass = $this->getClassMap()->get(Profile::class);
-                    $profile = $profileClass::findOne(['user_id' => $user->id]);
-                    $profile->name = $ldap_user->getAttribute('cn', 0);
-                    // Tries to save only if the name has been found
-                    if ($profile->name && !$profile->save()) {
-                        $this->error("Error saving the new profile in the database", $profile->errors);
-                        // FIXME handle save error
+                    /** @var UserEvent $event */
+                    $event = $this->make(UserEvent::class, [$user]);
+
+                    if ($user->validate()) {
+                        $this->trigger(UserEvent::EVENT_BEFORE_CREATE, $event);
+
+                        $mailService = NULL; // User is managed by LDAP, we don't want to send the welcome email
+
+                        if ($this->make(UserCreateService::class, [$user, $mailService])->run()) {
+                            $this->trigger(UserEvent::EVENT_AFTER_CREATE, $event);
+                        } else {
+                            $this->error("Error saving the new user {$user->username} in the database", $user->errors);
+                        }
+                    } else {
+                        $this->error("Error saving the new user {$user->username} in the database", $user->errors);
                     }
 
                     if ($this->defaultRoles !== false) {
@@ -433,13 +440,12 @@ class UsuarioLdapComponent extends Component
                     }
 
                     // Triggers the EVENT_AFTER_CREATE event
-                    $user->trigger(UserEvent::EVENT_AFTER_CREATE, new UserEvent($user));
                     $this->trigger(LdapUserEvent::EVENT_AFTER_LDAP_USER_CREATE, new LdapUserEvent($user, $this->ldapConfig));
                 } else {
                     $this->info("The user will be logged using the default user");
                     $user = User::findOne($this->defaultUserId);
                     if (empty($user)) {
-                        // The default User wasn't found, it has to be created
+                        // The default User wasn't found, it has to be created. It is not a normal user, we don't need to use Usuario UserCreateService
                         $user = Yii::createObject(User::class);
                         $user->id = $this->defaultUserId;
                         $user->email = "default@user.com";
