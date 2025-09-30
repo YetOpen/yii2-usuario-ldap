@@ -2,8 +2,8 @@
 
 namespace yetopen\usuarioLdap\controllers;
 
-use Adldap\Models\Contact;
-use Adldap\Models\User;
+use LdapRecord\Models\ActiveDirectory\Contact;
+use LdapRecord\Models\ActiveDirectory\User;
 use Da\User\Filter\AccessRuleFilter;
 use Da\User\Model\User as UsuarioUser;
 use yetopen\helpers\controllers\YOController;

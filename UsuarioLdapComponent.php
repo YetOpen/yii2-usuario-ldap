@@ -2,15 +2,14 @@
 
 namespace yetopen\usuarioLdap;
 
-use Adldap\Adldap;
-use Adldap\AdldapException;
-use Adldap\Connections\Provider;
-use Adldap\Models\Attributes\AccountControl;
-use Adldap\Models\Concerns\HasUserAccountControl;
-use Adldap\Models\Model;
-use Adldap\Models\User as AdldapUser;
-use Adldap\Query\Collection;
-use Adldap\Schemas\OpenLDAP;
+use LdapRecord\Connection;
+use LdapRecord\Container;
+use LdapRecord\Models\ActiveDirectory\User as AdldapUser;
+use LdapRecord\Models\OpenLDAP\User as OpenLdapUser;
+use LdapRecord\Models\Model;
+use LdapRecord\Query\Collection;
+use LdapRecord\Exceptions\LdapRecordException;
+use LdapRecord\Exceptions\ConnectionException;
 use Da\User\Controller\AdminController;
 use Da\User\Controller\RecoveryController;
 use Da\User\Controller\RegistrationController;
@@ -43,8 +42,8 @@ use yii\web\Application as WebApplication;
  *
  * @package yetopen\usuarioLdap
  *
- * @property Adldap|null $_ldapProvider
- * @property Adldap|null $_secondLdapProvider
+ * @property Connection|null $_ldapProvider
+ * @property Connection|null $_secondLdapProvider
  * @property array $ldapConfig
  * @property array $secondLdapConfig
  * @property bool $createLocalUsers
@@ -55,8 +54,8 @@ use yii\web\Application as WebApplication;
  * @property bool|array $otherOrganizationalUnits
  * @property array $mapUserARtoLDAPattr
  *
- * @property-read Adldap|null $ldapProvider
- * @property-read Adldap|null $secondLdapProvider
+ * @property-read Connection|null $ldapProvider
+ * @property-read Connection|null $secondLdapProvider
  */
 class UsuarioLdapComponent extends Component
 {
@@ -66,19 +65,19 @@ class UsuarioLdapComponent extends Component
     /**
      * Stores the LDAP provider
      *
-     * @var Adldap|null
+     * @var Connection|null
      */
     private $_ldapProvider;
 
     /**
      * Stores the second LDAP provider
      *
-     * @var Adldap|null
+     * @var Connection|null
      */
     private $_secondLdapProvider;
 
     /**
-     * Parameters for connecting to LDAP server as documented in https://adldap2.github.io/Adldap2/#/setup?id=options
+     * Parameters for connecting to LDAP server as documented in https://ldaprecord.com/docs/core/v2/configuration
      *
      * @var array
      */
@@ -272,16 +271,16 @@ class UsuarioLdapComponent extends Component
      */
     public function initAdLdap() {
         // Connect first LDAP
-        $ad = new Adldap();
-        $ad->addProvider($this->ldapConfig);
         try {
-            $ad->connect();
-            // If otherOrganizationalUnits setting is configured, attemps the login with the other OU
+            $connection = new Connection($this->ldapConfig);
+            $connection->connect();
+
+            // If otherOrganizationalUnits setting is configured, attempts the login with the other OU
             if($this->otherOrganizationalUnits) {
                 $config = $this->ldapConfig;
                 // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
                 foreach ($this->otherOrganizationalUnits as $otherOrganizationalUnit) {
-                    if($config['schema'] === OpenLDAP::class) {
+                    if(isset($config['schema']) && $config['schema'] === 'OpenLDAP') {
                         // Extracts the part of the base_dn after the OU and put it in $accountSuffix['rest']
                         preg_match('/(,ou=[\w]+)*(?<rest>,.*)*/i', $config['account_suffix'], $accountSuffix);
                         // Rebuilds the account_suffix
@@ -292,14 +291,14 @@ class UsuarioLdapComponent extends Component
                         $config['base_dn'] = "ou={$otherOrganizationalUnit},{$config['base_dn']},";
                     }
                     // Sets a provider with the configuration
-                    $ad->addProvider($config, $otherOrganizationalUnit);
-                    $ad->connect($otherOrganizationalUnit);
+                    $connection->setConfiguration($config);
+                    $connection->connect();
                     // Sets the config as the original
                     $config = $this->ldapConfig;
                 }
             }
-            $this->_ldapProvider = $ad;
-        } catch (adLDAPException $e) {
+            $this->_ldapProvider = $connection;
+        } catch (ConnectionException $e) {
             if(YII_DEBUG) {
                 throw $e;
             }
@@ -308,12 +307,11 @@ class UsuarioLdapComponent extends Component
         }
         // Connect second LDAP
         if ($this->secondLdapConfig !== FALSE) {
-            $ad2 = new Adldap();
-            $ad2->addProvider($this->secondLdapConfig);
             try {
-                $ad2->connect();
-                $this->_secondLdapProvider = $ad2;
-            } catch (adLDAPException $e) {
+                $connection2 = new Connection($this->secondLdapConfig);
+                $connection2->connect();
+                $this->_secondLdapProvider = $connection2;
+            } catch (ConnectionException $e) {
                 $this->error("Error connecting to the second LDAP Server", $e);
                 throw new LdapConfigurationErrorException($e->getMessage());
             }
@@ -345,7 +343,7 @@ class UsuarioLdapComponent extends Component
                 return;
             }
 
-            // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
+            // LDAP authentication using LdapRecord
             if (!$this->tryAuthentication($provider, $username, $password)) {
                 $failed = true;
                 if (is_array($this->otherOrganizationalUnits)) {
@@ -504,7 +502,7 @@ class UsuarioLdapComponent extends Component
             /* @var $provider Provider */
             $provider = Yii::$app->usuarioLdap->ldapProvider;
 
-            // https://adldap2.github.io/Adldap2/#/setup?id=authenticating
+            // LDAP authentication using LdapRecord
             if (!$this->tryAuthentication($provider, $form->getUser()->username, $form->current_password)) {
                 $failed = TRUE;
                 if($this->otherOrganizationalUnits) {
@@ -706,41 +704,44 @@ class UsuarioLdapComponent extends Component
     }
 
     /**
-     * @param $provider Provider
+     * @param $connection Connection
      * @param $username string
      * @param $password string
      * @return boolean
      * @throws MultipleUsersFoundException
-     * @throws \Adldap\Auth\BindException
-     * @throws \Adldap\Auth\PasswordRequiredException
-     * @throws \Adldap\Auth\UsernameRequiredException
+     * @throws \LdapRecord\Exceptions\LdapRecordException
+     * @throws \LdapRecord\Exceptions\ConnectionException
      */
 
-    private function tryAuthentication($provider, $username, $password)
+    private function tryAuthentication($connection, $username, $password)
     {
-        $this->info("Trying authentication for {$username} with provider", $provider->getConnection()->getName());
+        $this->info("Trying authentication for {$username} with connection");
         // Tries to authenticate the user with the standard configuration
-        if ($provider->auth()->attempt($username, $password)) {
-            $this->info("User successfully authenticated");
-            return true;
+        try {
+            if ($connection->auth()->attempt($username, $password)) {
+                $this->info("User successfully authenticated");
+                return true;
+            }
+        } catch (\Exception $e) {
+            $this->error("Authentication failed: " . $e->getMessage());
         }
 
         $this->info("Default authentication didn't work, it will be tried again with another attribute");
 
         // Finds the user first searching the username in ldap field configured
         try {
-            $user = $this->findLdapUser($username, self::$ldapAttrs, $provider);
+            $user = $this->findLdapUser($username, self::$ldapAttrs, $connection);
         } catch (NoLdapUserException $e) {
             $this->warning("Couldn't find the user using another attribute");
             return false;
         }
 
         // Gets the user authentication attribute from the distinguished name
-        $dn = $user->getAttribute($provider->getSchema()->distinguishedName(), 0);
+        $dn = $user->getDn();
         $this->info($dn);
 
         try {
-            if ($provider->auth()->attempt($dn, $password)) {
+            if ($connection->auth()->attempt($dn, $password)) {
                 $this->info("User successfully authenticated with \$dn");
                 return true;
             }
@@ -759,16 +760,16 @@ class UsuarioLdapComponent extends Component
         $this->info($userAuth);
 
         try {
-            // The provider configuration needs to be reset with the new account_prefix
-            $provider->setConfiguration($config);
-            $provider->connect();
+            // The connection configuration needs to be reset with the new account_prefix
+            $connection->setConfiguration($config);
+            $connection->connect();
             // Not sure the case with $dn covers all the cases, for now we keep this here
-            if ($provider->auth()->attempt($userAuth, $password)) {
+            if ($connection->auth()->attempt($userAuth, $password)) {
                 $this->info("User successfully authenticated with \$userAuth");
                 return true;
             }
-            $provider->setConfiguration($this->ldapConfig);
-            $provider->connect();
+            $connection->setConfiguration($this->ldapConfig);
+            $connection->connect();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }
@@ -778,17 +779,17 @@ class UsuarioLdapComponent extends Component
     /**
      * @param $username
      * @param string|string[] $keys
-     * @param string $provider
-     * @return AdldapUser
+     * @param Connection $connection
+     * @return AdldapUser|OpenLdapUser
      * @throws MultipleUsersFoundException
      * @throws \yetopen\usuarioLdap\NoLdapUserException
      */
-    public function findLdapUser ($username, $keys = null, $provider = null) {
+    public function findLdapUser ($username, $keys = null, $connection = null) {
         if ($keys === null) {
             $keys = self::$ldapAttrs;
         }
-        if (is_null($provider)) {
-            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
+        if (is_null($connection)) {
+            $connection = Yii::$app->usuarioLdap->secondLdapProvider;
         }
         if (key_exists($username, $this->ldapUsersCache)) {
             $this->info("User already found");
@@ -796,8 +797,15 @@ class UsuarioLdapComponent extends Component
         }
 
         if (!is_array($keys)) $keys = [$keys];
+
+        // Determine the user model class based on schema
+        $userModel = AdldapUser::class;
+        if (isset($this->ldapConfig['schema']) && $this->ldapConfig['schema'] === 'OpenLDAP') {
+            $userModel = OpenLdapUser::class;
+        }
+
         foreach ($keys as $key) {
-            $ldapUser = $provider->search()
+            $ldapUser = $userModel::on($connection)
                 ->where($this->userIdentificationLdapAttribute ?: $key, '=', $username)
                 ->first();
             if (!empty($ldapUser)) {
@@ -807,7 +815,7 @@ class UsuarioLdapComponent extends Component
         }
 
         if (empty($ldapUser)) {
-            $ldapUser = $provider->search()->find($username);
+            $ldapUser = $userModel::on($connection)->find($username);
             if (!empty($ldapUser)) {
                 $this->info("Found user with generic find");
             }
@@ -821,7 +829,7 @@ class UsuarioLdapComponent extends Component
             throw new MultipleUsersFoundException();
         }
 
-        if (get_class($ldapUser) !== AdldapUser::class) {
+        if (!($ldapUser instanceof $userModel)) {
             throw new NoLdapUserException("The search for the user returned an instance of the class " . get_class($ldapUser));
         }
         $this->ldapUsersCache[$username] = $ldapUser;
@@ -831,18 +839,24 @@ class UsuarioLdapComponent extends Component
 
     /**
      * @param $username
-     * @param null $provider
+     * @param null $connection
      * @param int $limit
      * @return Collection
      */
-    public function findLdapUsers($username, $provider = null, $limit = 20)
+    public function findLdapUsers($username, $connection = null, $limit = 20)
     {
-        /* @var $provider Provider */
-        if (is_null($provider)) {
-            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
+        /* @var $connection Connection */
+        if (is_null($connection)) {
+            $connection = Yii::$app->usuarioLdap->secondLdapProvider;
         }
 
-        $ldapUsers = $provider->search()->limit($limit)->find([$username]);
+        // Determine the user model class based on schema
+        $userModel = AdldapUser::class;
+        if (isset($this->ldapConfig['schema']) && $this->ldapConfig['schema'] === 'OpenLDAP') {
+            $userModel = OpenLdapUser::class;
+        }
+
+        $ldapUsers = $userModel::on($connection)->limit($limit)->find([$username]);
         if (!empty($ldapUsers)) {
             $this->info("Found users with attributes `$username`");
         }
@@ -855,8 +869,14 @@ class UsuarioLdapComponent extends Component
      * @throws ErrorException
      */
     private function createLdapUser ($user) {
-        /** @var AdldapUser $ldapUser */
-        $ldapUser = Yii::$app->usuarioLdap->secondLdapProvider->make()->user([
+        // Determine the user model class based on schema
+        $userModel = AdldapUser::class;
+        if (isset($this->ldapConfig['schema']) && $this->ldapConfig['schema'] === 'OpenLDAP') {
+            $userModel = OpenLdapUser::class;
+        }
+
+        /** @var AdldapUser|OpenLdapUser $ldapUser */
+        $ldapUser = new $userModel([
             'cn' => $user->username,
         ]);
 
@@ -931,11 +951,10 @@ class UsuarioLdapComponent extends Component
         }
 
         if ($username != $user->username) {
-            /** @var Provider $provider */
-            $provider = Yii::$app->usuarioLdap->secondLdapProvider;
-            $dn = $provider->getSchema()->commonName();
+            /** @var Connection $connection */
+            $connection = Yii::$app->usuarioLdap->secondLdapProvider;
             // If username is changed the procedure to change the cn in LDAP is the following
-            if (!$ldapUser->rename("$dn={$user->username}")) {
+            if (!$ldapUser->rename("cn={$user->username}")) {
                 throw new ErrorException("Impossible to rename the LDAP user");
             }
         }
@@ -1045,7 +1064,13 @@ class UsuarioLdapComponent extends Component
      */
     public function userByUsername(string $username): ?Model
     {
-        return $this->ldapProvider->search()->whereEquals('cn', $username)->first();
+        // Determine the user model class based on schema
+        $userModel = AdldapUser::class;
+        if (isset($this->ldapConfig['schema']) && $this->ldapConfig['schema'] === 'OpenLDAP') {
+            $userModel = OpenLdapUser::class;
+        }
+
+        return $userModel::on($this->ldapProvider)->whereEquals('cn', $username)->first();
     }
 
     /**

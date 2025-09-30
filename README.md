@@ -35,11 +35,11 @@ Add in your config (`config/web.php` for the basic app):
         'ldapConfig' => [
             'hosts' => ['host.example.com'],
             'base_dn' => 'dc=mydomain,dc=local',
-            'account_prefix' => 'cn=',
-            'account_suffix' => ',ou=Users,dc=mydomain,dc=local',
-            'use_ssl' => true,
             'username' => 'bind_username',
             'password' => 'bind_password',
+            'port' => 389,
+            'use_ssl' => true,
+            'use_tls' => false,
         ],
         'createLocalUsers' => TRUE,
         'defaultRoles' => ['standardUser'],
@@ -47,10 +47,11 @@ Add in your config (`config/web.php` for the basic app):
         'secondLdapConfig' => [
             'hosts' => ['host.example.com'],
             'base_dn' => 'dc=mydomain,dc=local',
-            'account_prefix' => 'cn=',
-            'account_suffix' => ',ou=Users,dc=mydomain,dc=local',
             'username' => 'bind_username',
             'password' => 'bind_password',
+            'port' => 389,
+            'use_ssl' => true,
+            'use_tls' => false,
         ],
         'allowPasswordRecovery' => FALSE,
         'passwordRecoveryRedirect' => ['/controller/action']
@@ -58,11 +59,11 @@ Add in your config (`config/web.php` for the basic app):
     //...
 ]
 ```
-adapting parameters to your setup. 
+adapting parameters to your setup.
 
 #### Configuration options
 
-* **ldapConfig**: all the parameters for connecting to LDAP server as documented in [Adldap2](https://adldap2.github.io/Adldap2/#/setup?id=options)
+* **ldapConfig**: all the parameters for connecting to LDAP server as documented in [LdapRecord](https://ldaprecord.com/docs/core/v2/configuration)
 * **createLocalUsers**: if TRUE when a user successfully authenticate against the first LDAP server is created locally in Yii database. If FALSE a default users with ID specified in `defaultUserId` is used for the session
 * **defaultRoles**: if specified the role/s will be assigned to the users created by the extension. Can be set as an array. Default to FALSE
 * **secondLdapConfig**: if specified this is used as LDAP server for sync the local users, if not specified this is equal to _ldapConfig_
