@@ -323,15 +323,36 @@ class UsuarioLdapComponent extends Component
         parent::init();
     }
 
+    /**
+     * Same as initAdLdap() but, when the LDAP server can't be reached, it logs the error and returns FALSE
+     * instead of throwing, so that the standard yii2-usuario flow can continue without LDAP.
+     * When YII_DEBUG is enabled the original connection exception is still thrown by initAdLdap().
+     *
+     * @return bool TRUE if the providers have been initialized
+     */
+    protected function tryInitAdLdap()
+    {
+        try {
+            $this->initAdLdap();
+        } catch (LdapConfigurationErrorException $e) {
+            $this->warning("LDAP server unavailable, continuing without LDAP", $e->getMessage());
+            return false;
+        }
+        return true;
+    }
+
     public function events() {
         Event::on(LoginForm::class, LoginForm::EVENT_AFTER_VALIDATE, function (Event $event) {
-            $this->initAdLdap();
-
             /* @var $form \Da\User\Form\LoginForm */
             $form = $event->sender;
 
             if (!$form->hasErrors()) {
                 // Local login already succeeded, no need to try LDAP
+                return;
+            }
+
+            if (!$this->tryInitAdLdap()) {
+                // LDAP server unreachable, the standard yii2-usuario login result stands
                 return;
             }
 
@@ -500,13 +521,16 @@ class UsuarioLdapComponent extends Component
         });
 
         Event::on(SettingsForm::class, SettingsForm::EVENT_AFTER_VALIDATE, function (Event $event) {
-            $this->initAdLdap();
-
             /* @var $form \Da\User\Form\SettingsForm */
             $form = $event->sender;
 
             if (!$form->hasErrors() && empty($form->current_password)) {
                 // Local login already succeeded, no need to try LDAP
+                return;
+            }
+
+            if (!$this->tryInitAdLdap()) {
+                // LDAP server unreachable, the standard yii2-usuario validation result stands
                 return;
             }
 
@@ -542,7 +566,10 @@ class UsuarioLdapComponent extends Component
         }
 
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
-            $this->initAdLdap();
+            if (!$this->tryInitAdLdap()) {
+                // The user is already logged in, the sync will be attempted again on their next login
+                return;
+            }
             /**
              * After a successful login if no LDAP user is found I create it.
              * Is the only point where I can have the user password in clear for existing users
