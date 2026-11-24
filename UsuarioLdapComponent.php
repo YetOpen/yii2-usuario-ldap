@@ -35,10 +35,12 @@ use yetopen\anagrafica\models\Anagrafica;
 use Yii;
 use yii\base\Component;
 use yii\base\Event;
+use yii\base\ModelEvent;
 use yii\db\ActiveRecord;
 use yii\helpers\ArrayHelper;
 use yii\helpers\VarDumper;
 use yii\web\Application as WebApplication;
+use yii\web\IdentityInterface;
 
 /**
  * Class Module
@@ -52,6 +54,7 @@ use yii\web\Application as WebApplication;
  * @property bool $createLocalUsers
  * @property bool|array $defaultRoles
  * @property bool $syncUsersToLdap
+ * @property bool $allowPasswordChange
  * @property int $defaultUserId
  * @property string $userIdentificationLdapAttribute
  * @property bool|array $otherOrganizationalUnits
@@ -64,6 +67,22 @@ class UsuarioLdapComponent extends Component
 {
     use ContainerAwareTrait;
     use AuthManagerAwareTrait;
+
+    /**
+     * Value of `user.login_source` for a user whose password was last accepted by the local password check
+     */
+    const LOGIN_SOURCE_LOCAL = 'local';
+
+    /**
+     * Value of `user.login_source` for a user whose password was last accepted by the LDAP server
+     */
+    const LOGIN_SOURCE_LDAP = 'ldap';
+
+    /**
+     * Value returned by the users search ({@see \yetopen\usuarioLdap\controllers\LdapController::actionSearch()})
+     * for an LDAP entry that has neither an identifier nor an email
+     */
+    const LDAP_INVALID_USER = 'LDAP_INVALID_USER';
 
     /**
      * Stores the LDAP provider
@@ -127,6 +146,19 @@ class UsuarioLdapComponent extends Component
      * @var bool
      */
     public $syncUsersToLdap = false;
+
+    /**
+     * Whether users may set a new password from their Account settings regardless of how they sign in.
+     * If FALSE, only users whose last successful login was checked against the local password
+     * (`user.login_source` = `local`) may change it: a user who signs in through LDAP, or whose source is still
+     * unknown (`NULL`), sees no password field and a submitted one is rejected. Use it when $syncUsersToLdap is
+     * FALSE, otherwise a local password set by an LDAP user stays valid next to the LDAP one.
+     * Requires the `login_source` column ({@see \yetopen\usuarioLdap\migrations\M261117000000AddLoginSourceToUser})
+     * and a yii2-usuario providing `SettingsForm::EVENT_PASSWORD_CHANGE_ALLOWED`.
+     *
+     * @var bool
+     */
+    public $allowPasswordChange = true;
 
     /**
      * Specify the default ID of the User used for the session.
@@ -264,7 +296,7 @@ class UsuarioLdapComponent extends Component
     public function getSecondLdapProvider()
     {
         if (empty($this->_secondLdapProvider)) {
-            $this->initAdLdap();
+            $this->initSecondAdLdap();
         }
         return $this->_secondLdapProvider;
     }
@@ -308,33 +340,43 @@ class UsuarioLdapComponent extends Component
             $this->error("Error connecting to LDAP Server", $e->getMessage());
             throw new LdapConfigurationErrorException($e->getMessage());
         }
-        // Connect second LDAP
-        if ($this->secondLdapConfig !== FALSE) {
-            $ad2 = new Adldap();
-            $ad2->addProvider($this->secondLdapConfig);
-            try {
-                $ad2->connect();
-                $this->_secondLdapProvider = $ad2;
-            } catch (adLDAPException $e) {
-                $this->error("Error connecting to the second LDAP Server", $e);
-                throw new LdapConfigurationErrorException($e->getMessage());
-            }
+    }
+
+    /**
+     * Instantiates the second provider. It is connected only when something actually uses it
+     * ({@see getSecondLdapProvider()}), so a login does not wait for, or fail on, a server it never queries.
+     *
+     * @throws LdapConfigurationErrorException
+     */
+    public function initSecondAdLdap()
+    {
+        if ($this->secondLdapConfig === FALSE) {
+            return;
         }
-        parent::init();
+        $ad2 = new Adldap();
+        $ad2->addProvider($this->secondLdapConfig);
+        try {
+            $ad2->connect();
+            $this->_secondLdapProvider = $ad2;
+        } catch (adLDAPException $e) {
+            $this->error("Error connecting to the second LDAP Server", $e);
+            throw new LdapConfigurationErrorException($e->getMessage());
+        }
     }
 
     /**
      * Same as initAdLdap() but, when the LDAP server can't be reached, it logs the error and returns FALSE
      * instead of throwing, so that the standard yii2-usuario flow can continue without LDAP.
-     * When YII_DEBUG is enabled the original connection exception is still thrown by initAdLdap().
+     * It also catches the raw Adldap exception initAdLdap() rethrows with YII_DEBUG enabled: an unreachable
+     * directory must not lock local users out of a development or test instance either.
      *
-     * @return bool TRUE if the providers have been initialized
+     * @return bool TRUE if the provider has been initialized
      */
     protected function tryInitAdLdap()
     {
         try {
             $this->initAdLdap();
-        } catch (LdapConfigurationErrorException $e) {
+        } catch (LdapConfigurationErrorException|AdldapException $e) {
             $this->warning("LDAP server unavailable, continuing without LDAP", $e->getMessage());
             return false;
         }
@@ -346,8 +388,10 @@ class UsuarioLdapComponent extends Component
             /* @var $form \Da\User\Form\LoginForm */
             $form = $event->sender;
 
-            if (!$form->hasErrors()) {
-                // Local login already succeeded, no need to try LDAP
+            if ($form->getUser() !== null && !$form->hasErrors('password')) {
+                // The local password check succeeded, no need to try LDAP. Any other error (blocked account,
+                // missing 2FA code, ...) is not LDAP's business either.
+                $this->recordLoginSource($form->getUser(), self::LOGIN_SOURCE_LOCAL);
                 return;
             }
 
@@ -443,13 +487,27 @@ class UsuarioLdapComponent extends Component
 
                         $mailService = NULL; // User is managed by LDAP, we don't want to send the welcome email
 
-                        if ($this->make(UserCreateService::class, [$user, $mailService])->run()) {
-                            $this->trigger(UserEvent::EVENT_AFTER_CREATE, $event);
-                        } else {
+                        if (!$this->make(UserCreateService::class, [$user, $mailService])->run()) {
                             $this->error("Error saving the new user {$user->username} in the database", $user->errors);
+                            // The user does not exist: the login fails with the standard error
+                            return;
                         }
+                        $this->trigger(UserEvent::EVENT_AFTER_CREATE, $event);
                     } else {
                         $this->error("Error saving the new user {$user->username} in the database", $user->errors);
+                        // The user does not exist: the login fails with the standard error
+                        return;
+                    }
+
+                    // Gets the profile name of the user from the CN of the LDAP user
+                    $profileClass = $this->getClassMap()->get(Profile::class);
+                    $profile = $profileClass::findOne(['user_id' => $user->id]);
+                    $name = $ldap_user->getAttribute('cn', 0);
+                    if ($profile !== null && !empty($name)) {
+                        $profile->name = $name;
+                        if (!$profile->save()) {
+                            $this->error("Error saving the profile name of the new user {$user->username}", $profile->errors);
+                        }
                     }
 
                     if ($this->defaultRoles !== false) {
@@ -495,29 +553,38 @@ class UsuarioLdapComponent extends Component
 
             $userIdentity = $clIdentityUser::findIdentity($user->id);
             $form->setUser($userIdentity);
+            $this->recordLoginSource($userIdentity, self::LOGIN_SOURCE_LDAP);
 
             $this->info("The user '{$user->username}' has successfully logged in via LDAP");
         });
 
         Event::on(RecoveryController::class, FormEvent::EVENT_BEFORE_REQUEST, function (FormEvent $event) {
-            $this->initAdLdap();
             /**
              * After a user recovery request is sent, it checks if the email given is one of a LDAP user.
              * If the user is found and the parameter `allowPasswordRecovery` is set to FALSE, it redirect
              * to the url specified in `passwordRecoveryRedirect`
              */
-            $form = $event->getForm();
-            $email = $form->email;
-            try {
-                $ldapUser = $this->findLdapUser($email, 'mail', Yii::$app->usuarioLdap->ldapProvider);
-            } catch (NoLdapUserException $e) {
-                $this->info("User $email not found");
+            if ($this->allowPasswordRecovery) {
                 return;
             }
-            if (!is_null($ldapUser) && !$this->allowPasswordRecovery) {
-                Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
-                Yii::$app->end();
+            $form = $event->getForm();
+            $email = $form->email;
+            if ($this->tryInitAdLdap()) {
+                try {
+                    $this->findLdapUser($email, 'mail', Yii::$app->usuarioLdap->ldapProvider);
+                } catch (NoLdapUserException $e) {
+                    $this->info("User $email not found");
+                    return;
+                } catch (MultipleUsersFoundException $e) {
+                    $this->warning("More than one LDAP user found for $email, the recovery is refused");
+                }
+            } else {
+                // Whether $email belongs to an LDAP user cannot be checked: refuse rather than let an LDAP user
+                // set a local password
+                $this->warning("LDAP server unavailable, the recovery request for $email is refused");
             }
+            Yii::$app->controller->redirect($this->passwordRecoveryRedirect)->send();
+            Yii::$app->end();
         });
 
         Event::on(SettingsForm::class, SettingsForm::EVENT_AFTER_VALIDATE, function (Event $event) {
@@ -560,6 +627,16 @@ class UsuarioLdapComponent extends Component
             // based on previous local authentication so that they can still save
             $form->clearErrors('current_password');
         });
+        if ($this->allowPasswordChange === false) {
+            Event::on(SettingsForm::class, SettingsForm::EVENT_PASSWORD_CHANGE_ALLOWED, function (ModelEvent $event) {
+                /* @var $form SettingsForm */
+                $form = $event->sender;
+                if (!$this->canChangePassword($form->getUser())) {
+                    $event->isValid = false;
+                }
+            });
+        }
+
         if ($this->syncUsersToLdap !== true) {
             // If I don't have to sync the local users to LDAP I don't need next events
             return;
@@ -568,6 +645,13 @@ class UsuarioLdapComponent extends Component
         Event::on(SecurityController::class, FormEvent::EVENT_AFTER_LOGIN, function (FormEvent $event) {
             if (!$this->tryInitAdLdap()) {
                 // The user is already logged in, the sync will be attempted again on their next login
+                return;
+            }
+            // The sync works on the second server, which is connected lazily: check it the same way
+            try {
+                $this->getSecondLdapProvider();
+            } catch (LdapConfigurationErrorException|AdldapException $e) {
+                $this->warning("Second LDAP server unavailable, the sync is skipped", $e->getMessage());
                 return;
             }
             /**
@@ -1019,6 +1103,9 @@ class UsuarioLdapComponent extends Component
         if ($this->allowPasswordRecovery === false && is_null($this->passwordRecoveryRedirect)) {
             throw new LdapConfigurationErrorException('passwordRecoveryRedirect must be specified if allowPasswordRecovery is set to FALSE');
         }
+        if ($this->allowPasswordChange === false && !defined(SettingsForm::class . '::EVENT_PASSWORD_CHANGE_ALLOWED')) {
+            throw new LdapConfigurationErrorException('allowPasswordChange = FALSE requires a yii2-usuario providing SettingsForm::EVENT_PASSWORD_CHANGE_ALLOWED');
+        }
     }
 
     /**
@@ -1072,6 +1159,40 @@ class UsuarioLdapComponent extends Component
             $message .= ": " . VarDumper::dumpAsString($object);
         }
         Yii::$level($message, $this->logCategory);
+    }
+
+    /**
+     * Whether the user may set a new password from their Account settings, see $allowPasswordChange.
+     *
+     * @param User|null $user
+     * @return bool
+     */
+    public function canChangePassword(?User $user): bool
+    {
+        if ($this->allowPasswordChange !== false) {
+            return true;
+        }
+        // NULL (never recorded, or column missing) is unknown and treated as LDAP
+        return $user !== null
+            && $user->hasAttribute('login_source')
+            && $user->getAttribute('login_source') === self::LOGIN_SOURCE_LOCAL;
+    }
+
+    /**
+     * Records which check accepted the password of the user (last login wins). It does nothing when the
+     * `login_source` column does not exist, i.e. before the migration has been applied.
+     *
+     * @param User|IdentityInterface|null $user
+     * @param string $source one of the LOGIN_SOURCE_* constants
+     */
+    protected function recordLoginSource($user, string $source)
+    {
+        if (!$user instanceof ActiveRecord || !$user->hasAttribute('login_source')) {
+            return;
+        }
+        if ($user->getAttribute('login_source') !== $source) {
+            $user->updateAttributes(['login_source' => $source]);
+        }
     }
 
     /**
