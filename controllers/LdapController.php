@@ -5,7 +5,6 @@ namespace yetopen\usuarioLdap\controllers;
 use Adldap\Models\Contact;
 use Adldap\Models\User;
 use Da\User\Filter\AccessRuleFilter;
-use Da\User\Model\User as UsuarioUser;
 use yetopen\helpers\controllers\YOController;
 use yetopen\usuarioLdap\UsuarioLdapComponent;
 use Yii;
@@ -42,13 +41,13 @@ class LdapController extends YOController
         foreach ($ldapUsers as $ldapUser) {
             /** @var User|Contact $ldapUser */
             $userData = [];
-            $value = is_a(User::class, $ldapUser) ? $ldapUser->getAuthIdentifier() : $ldapUser->getEmail();
+            $value = is_a($ldapUser, User::class) ? $ldapUser->getAuthIdentifier() : $ldapUser->getEmail();
             $userData['value'] = $value;
             $userData['label'] = $ldapUser->getFirstName() . ' ' . $ldapUser->getLastName() . ' - ' . $ldapUser->getEmail();
             $userData['q'] = $q;
             if(empty($value)) {
                 // User has neither uid nor email, showing it with note that it has no mail
-                $userData['value'] = UsuarioUser::LDAP_INVALID_USER;
+                $userData['value'] = UsuarioLdapComponent::LDAP_INVALID_USER;
                 $userData['label'] = $userData['label'] . Yii::t('usuario', 'Invalid LDAP user');
             }
             $output[] = $userData;

@@ -1,6 +1,17 @@
 Yii2 Usuario LDAP Changelog
 ===========================
 
+1.4.0 under development
+-------------------------
+- `user.login_source` (`local` / `ldap`, migration `M261117000000AddLoginSourceToUser`) records which check accepted the password at every successful login
+- New option `allowPasswordChange` (default TRUE): when FALSE only users with `login_source` = `local` may change their password from Account (requires yii2-usuario `SettingsForm::EVENT_PASSWORD_CHANGE_ALLOWED`); new public `canChangePassword()`
+- Local users can sign in while the LDAP server is unreachable: LDAP is contacted only after the local password check failed, also with `YII_DEBUG` enabled (#12)
+- A password recovery request no longer fails with a 500 while the LDAP server is unreachable
+- The second LDAP server is connected only when it is used
+- Fix: a failed creation of the local user on the first LDAP login stops the login instead of continuing with a user without id
+- Fix: the profile name of a user created from LDAP is taken again from the LDAP `cn`
+- Fix: `LdapController::actionSearch()` swapped `is_a()` arguments and referenced the missing `LDAP_INVALID_USER` constant
+
 1.3.13 Nov 20, 2024
 -------------------------
 - LDAP local user creation use Usuario UserCreateService
